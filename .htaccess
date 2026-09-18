@@ -1,0 +1,40 @@
+RewriteEngine On
+RewriteBase /mrs.millet.delivery-boy/
+
+# -----------------------------------------
+# Remove .php extension from URL
+# Example:
+# /mrs.millet.delivery-boy/login.php
+# becomes:
+# /mrs.millet.delivery-boy/login
+# -----------------------------------------
+RewriteCond %{THE_REQUEST} \s/+mrs\.millet\.delivery-boy/(.+?)\.php[\s?] [NC]
+RewriteCond %{REQUEST_METHOD} GET
+RewriteRule ^(.+)\.php$ /mrs.millet.delivery-boy/$1 [R=301,L]
+
+# -----------------------------------------
+# Don't rewrite existing files or folders
+# -----------------------------------------
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+
+# -----------------------------------------
+# Automatically load .php files
+# Example:
+# /mrs.millet.delivery-boy/login
+# loads:
+# login.php
+# -----------------------------------------
+RewriteRule ^(.+)$ $1.php [L,QSA]
+
+# -----------------------------------------
+# Default homepage
+# -----------------------------------------
+RewriteRule ^$ index.php [L]
+
+# -----------------------------------------
+# Don't rewrite AJAX POST requests
+# -----------------------------------------
+RewriteCond %{REQUEST_URI} ^/mrs\.millet\.delivery-boy/ajax/
+RewriteCond %{REQUEST_METHOD} POST
+RewriteRule ^ - [L]
