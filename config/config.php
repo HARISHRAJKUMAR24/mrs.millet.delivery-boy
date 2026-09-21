@@ -325,3 +325,55 @@ function getData(
         return '';
     }
 }
+
+
+/* -----------------------------------------
+   GET SETTINGS ROW (single row, id = 1)
+----------------------------------------- */
+
+if (!function_exists('getSettings')) {
+    function getSettings($pdo)
+    {
+        try {
+            $stmt = $pdo->query("SELECT * FROM settings WHERE id = 1 LIMIT 1");
+            $row = $stmt->fetch();
+
+            if (!$row) {
+                // insert default
+                $pdo->exec("INSERT INTO settings (id) VALUES (1)");
+                $stmt = $pdo->query("SELECT * FROM settings WHERE id = 1 LIMIT 1");
+                $row = $stmt->fetch();
+            }
+
+            return $row;
+        } catch (PDOException $e) {
+            return null;
+        }
+    }
+}
+
+
+/* =========================================================
+   JSON RESPONSE HELPER
+   ========================================================= */
+
+if (!function_exists('jsonResponse')) {
+    function jsonResponse(bool $success, string $message = '', $data = null): void
+    {
+        if (!headers_sent()) {
+            header('Content-Type: application/json; charset=utf-8');
+        }
+
+        $payload = [
+            'success' => $success,
+            'message' => $message
+        ];
+
+        if ($data !== null) {
+            $payload['data'] = $data;
+        }
+
+        echo json_encode($payload, JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+}

@@ -16,7 +16,7 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Delivery Login · <?= htmlspecialchars($siteName) ?></title>
+    <title>Delivery Register · <?= htmlspecialchars($siteName) ?></title>
 
     <?php if (!empty($settings['favicon_image'])): ?>
         <link rel="icon" href="<?= ADMIN_URL . htmlspecialchars($settings['favicon_image']) ?>">
@@ -28,12 +28,9 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
 
     <style>
-        * {
-            box-sizing: border-box;
-        }
+        * { box-sizing: border-box; }
 
-        html,
-        body {
+        html, body {
             margin: 0;
             padding: 0;
             font-family: "DM Sans", sans-serif;
@@ -56,13 +53,8 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
         }
 
         @keyframes bgShift {
-            0% {
-                background-position: 0% 0%;
-            }
-
-            100% {
-                background-position: 100% 100%;
-            }
+            0%   { background-position: 0% 0%; }
+            100% { background-position: 100% 100%; }
         }
 
         .bubble {
@@ -74,59 +66,39 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
         }
 
         .bubble.b1 {
-            width: 260px;
-            height: 260px;
-            top: -80px;
-            left: -80px;
+            width: 260px; height: 260px;
+            top: -80px; left: -80px;
             background: radial-gradient(circle at 30% 30%, #fbe8e9, #f3c8cc);
             opacity: .55;
             animation: floatA 9s ease-in-out infinite;
         }
 
         .bubble.b2 {
-            width: 200px;
-            height: 200px;
-            bottom: -70px;
-            right: -60px;
+            width: 200px; height: 200px;
+            bottom: -70px; right: -60px;
             background: radial-gradient(circle at 30% 30%, #e8f6ea, #b6e0bd);
             opacity: .5;
             animation: floatB 11s ease-in-out infinite;
         }
 
         .bubble.b3 {
-            width: 140px;
-            height: 140px;
-            top: 40%;
-            right: 8%;
+            width: 140px; height: 140px;
+            top: 40%; right: 8%;
             background: radial-gradient(circle at 30% 30%, #fff5ec, #ffe3cf);
             opacity: .6;
             animation: floatA 7s ease-in-out infinite reverse;
         }
 
         @keyframes floatA {
-
-            0%,
-            100% {
-                transform: translate(0, 0) scale(1);
-            }
-
-            50% {
-                transform: translate(14px, -22px) scale(1.06);
-            }
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            50%      { transform: translate(14px, -22px) scale(1.06); }
         }
-
         @keyframes floatB {
-
-            0%,
-            100% {
-                transform: translate(0, 0) scale(1);
-            }
-
-            50% {
-                transform: translate(-18px, 16px) scale(1.05);
-            }
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            50%      { transform: translate(-18px, 16px) scale(1.05); }
         }
 
+        /* CARD */
         .login-wrap {
             position: relative;
             z-index: 1;
@@ -134,29 +106,25 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
             max-width: 940px;
             background: #fff;
             border-radius: 26px;
-            box-shadow: 0 40px 80px rgba(48, 41, 35, .10), 0 4px 14px rgba(48, 41, 35, .05);
+            box-shadow:
+                0 40px 80px rgba(48, 41, 35, .10),
+                0 4px 14px rgba(48, 41, 35, .05);
             overflow: hidden;
             display: grid;
             grid-template-columns: 1.05fr 1fr;
-            min-height: 560px;
+            min-height: 620px;
             animation: cardIn .7s cubic-bezier(.2, .9, .3, 1.05) both;
         }
 
         @keyframes cardIn {
-            0% {
-                opacity: 0;
-                transform: translateY(18px) scale(.98);
-            }
-
-            100% {
-                opacity: 1;
-                transform: translateY(0) scale(1);
-            }
+            0%   { opacity: 0; transform: translateY(18px) scale(.98); }
+            100% { opacity: 1; transform: translateY(0) scale(1); }
         }
 
+        /* LEFT SIDE */
         .side-left {
             background: radial-gradient(circle at 100% 0%, rgba(255, 255, 255, .18), transparent 55%),
-                linear-gradient(155deg, #8e1722 0%, #b51f2c 45%, #7a121b 100%);
+                        linear-gradient(155deg, #8e1722 0%, #b51f2c 45%, #7a121b 100%);
             padding: 44px 40px;
             color: #fff;
             display: flex;
@@ -170,22 +138,15 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
         }
 
         @keyframes panelShift {
-            0% {
-                background-position: 0% 0%;
-            }
-
-            100% {
-                background-position: 100% 100%;
-            }
+            0%   { background-position: 0% 0%; }
+            100% { background-position: 100% 100%; }
         }
 
         .side-left::before {
             content: "";
             position: absolute;
-            top: -60px;
-            left: -80px;
-            width: 320px;
-            height: 320px;
+            top: -60px; left: -80px;
+            width: 320px; height: 320px;
             border-radius: 50%;
             background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, .10), transparent 70%);
             animation: floatA 12s ease-in-out infinite;
@@ -194,15 +155,14 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
         .side-left::after {
             content: "";
             position: absolute;
-            bottom: -100px;
-            right: -80px;
-            width: 260px;
-            height: 260px;
+            bottom: -100px; right: -80px;
+            width: 260px; height: 260px;
             border-radius: 50%;
             background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, .06), transparent 70%);
             animation: floatB 15s ease-in-out infinite;
         }
 
+        /* ===== LOGO with PULSE + SHIMMER ===== */
         .brand-logo-big {
             position: relative;
             z-index: 1;
@@ -218,7 +178,7 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
             animation: logoPop .9s .15s cubic-bezier(.2, .9, .3, 1.2) both, logoPulse 3.2s 1.1s ease-in-out infinite;
         }
 
-        /* ===== GLASS SHIMMER ON LOGO ===== */
+        /* Glass shimmer on logo */
         .brand-logo-big::before {
             content: "";
             position: absolute;
@@ -245,29 +205,15 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
         }
 
         @keyframes logoPop {
-            0% {
-                opacity: 0;
-                transform: scale(.6) rotate(-6deg);
-            }
-
-            60% {
-                opacity: 1;
-                transform: scale(1.06) rotate(2deg);
-            }
-
-            100% {
-                opacity: 1;
-                transform: scale(1) rotate(0);
-            }
+            0%   { opacity: 0; transform: scale(.6) rotate(-6deg); }
+            60%  { opacity: 1; transform: scale(1.06) rotate(2deg); }
+            100% { opacity: 1; transform: scale(1) rotate(0); }
         }
 
         @keyframes logoPulse {
-
-            0%,
-            100% {
+            0%, 100% {
                 box-shadow: 0 20px 50px rgba(0, 0, 0, .22), 0 0 0 0 rgba(255, 255, 255, .35);
             }
-
             50% {
                 box-shadow: 0 24px 60px rgba(0, 0, 0, .28), 0 0 0 14px rgba(255, 255, 255, 0);
             }
@@ -341,17 +287,9 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
             animation: fadeUp .7s ease forwards;
         }
 
-        .feature-list li:nth-child(1) {
-            animation-delay: .75s;
-        }
-
-        .feature-list li:nth-child(2) {
-            animation-delay: .9s;
-        }
-
-        .feature-list li:nth-child(3) {
-            animation-delay: 1.05s;
-        }
+        .feature-list li:nth-child(1) { animation-delay: .75s; }
+        .feature-list li:nth-child(2) { animation-delay: .9s; }
+        .feature-list li:nth-child(3) { animation-delay: 1.05s; }
 
         .feature-list li i {
             width: 30px;
@@ -366,54 +304,36 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
             animation: iconGlow 3s ease-in-out infinite;
         }
 
-        .feature-list li:nth-child(2) i {
-            animation-delay: .4s;
-        }
-
-        .feature-list li:nth-child(3) i {
-            animation-delay: .8s;
-        }
+        .feature-list li:nth-child(2) i { animation-delay: .4s; }
+        .feature-list li:nth-child(3) i { animation-delay: .8s; }
 
         @keyframes iconGlow {
-
-            0%,
-            100% {
-                background: rgba(255, 255, 255, .15);
-            }
-
-            50% {
-                background: rgba(255, 255, 255, .28);
-            }
+            0%, 100% { background: rgba(255, 255, 255, .15); }
+            50%      { background: rgba(255, 255, 255, .28); }
         }
 
+        /* RIGHT SIDE */
         .side-right {
-            padding: 46px 44px;
+            padding: 36px 40px;
             display: flex;
             flex-direction: column;
             justify-content: center;
         }
 
         .form-head {
-            margin-bottom: 28px;
+            margin-bottom: 20px;
             opacity: 0;
             animation: fadeUp .7s .35s ease forwards;
         }
 
         @keyframes fadeUp {
-            0% {
-                opacity: 0;
-                transform: translateY(10px);
-            }
-
-            100% {
-                opacity: 1;
-                transform: translateY(0);
-            }
+            0%   { opacity: 0; transform: translateY(10px); }
+            100% { opacity: 1; transform: translateY(0); }
         }
 
         .form-head h1 {
             font-family: "Playfair Display", serif;
-            font-size: 26px;
+            font-size: 24px;
             font-weight: 700;
             color: #302923;
             margin: 0 0 6px;
@@ -426,33 +346,28 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
         }
 
         .form-group {
-            margin-bottom: 16px;
+            margin-bottom: 12px;
             opacity: 0;
             animation: fadeUp .7s ease forwards;
         }
 
-        .form-group:nth-of-type(1) {
-            animation-delay: .45s;
-        }
-
-        .form-group:nth-of-type(2) {
-            animation-delay: .55s;
-        }
+        .form-group:nth-of-type(1) { animation-delay: .40s; }
+        .form-group:nth-of-type(2) { animation-delay: .48s; }
+        .form-group:nth-of-type(3) { animation-delay: .56s; }
+        .form-group:nth-of-type(4) { animation-delay: .64s; }
 
         .form-group label {
             display: block;
             font-size: 11px;
             font-weight: 700;
             color: #4e4841;
-            margin-bottom: 6px;
+            margin-bottom: 5px;
             letter-spacing: .2px;
         }
 
-        .input-wrap {
-            position: relative;
-        }
+        .input-wrap { position: relative; }
 
-        .input-wrap>i {
+        .input-wrap > i {
             position: absolute;
             left: 14px;
             top: 50%;
@@ -465,7 +380,7 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
 
         .input-wrap input {
             width: 100%;
-            height: 48px;
+            height: 44px;
             border: 1.5px solid #ece5da;
             background: #fffdf9;
             border-radius: 12px;
@@ -490,8 +405,8 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
             transform: translateY(-1px);
         }
 
-        .input-wrap input:focus+i,
-        .input-wrap input:focus~i {
+        .input-wrap input:focus + i,
+        .input-wrap input:focus ~ i {
             color: #b51f2c;
         }
 
@@ -519,31 +434,11 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
             background: #fbe8e9;
         }
 
-        .row-between {
-            display: flex;
-            align-items: center;
-            justify-content: flex-end;
-            margin: 6px 0 20px;
-            font-size: 11px;
-            opacity: 0;
-            animation: fadeUp .7s .65s ease forwards;
-        }
-
-        .link-forgot {
-            color: #b51f2c;
-            font-weight: 700;
-            text-decoration: none;
-            transition: .15s;
-        }
-
-        .link-forgot:hover {
-            text-decoration: underline;
-        }
-
-        /* ===== SIGN IN BUTTON — clean, no shimmer ===== */
-        .btn-login {
+        /* ===== CREATE ACCOUNT BUTTON — clean, no shimmer ===== */
+        .btn-register {
             width: 100%;
-            height: 48px;
+            height: 46px;
+            margin-top: 6px;
             border: none;
             background: linear-gradient(135deg, #b51f2c 0%, #8e1722 100%);
             color: #fff;
@@ -557,25 +452,19 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
             align-items: center;
             justify-content: center;
             gap: 9px;
-            transition: .2s ease;
+            transition: transform .2s ease, box-shadow .2s ease, opacity .2s ease;
             box-shadow: 0 8px 22px rgba(181, 31, 44, .25);
             opacity: 0;
-            animation: fadeUp .7s .75s ease forwards;
+            animation: fadeUp .7s .72s ease forwards;
         }
 
-        .btn-login:hover:not(:disabled) {
+        .btn-register:hover:not(:disabled) {
             transform: translateY(-1px);
             box-shadow: 0 12px 28px rgba(181, 31, 44, .32);
         }
 
-        .btn-login:active:not(:disabled) {
-            transform: translateY(0);
-        }
-
-        .btn-login:disabled {
-            opacity: .85;
-            cursor: not-allowed;
-        }
+        .btn-register:active:not(:disabled) { transform: translateY(0); }
+        .btn-register:disabled { opacity: .85; cursor: not-allowed; }
 
         .btn-spinner {
             width: 15px;
@@ -587,11 +476,26 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
             display: inline-block;
         }
 
-        @keyframes spin {
-            to {
-                transform: rotate(360deg);
-            }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .foot-note {
+            margin-top: 16px;
+            padding-top: 14px;
+            border-top: 1px dashed #f0ebe4;
+            text-align: center;
+            font-size: 11.5px;
+            color: #948c82;
+            opacity: 0;
+            animation: fadeUp .7s .80s ease forwards;
         }
+
+        .foot-note a {
+            color: #b51f2c;
+            font-weight: 700;
+            text-decoration: none;
+        }
+
+        .foot-note a:hover { text-decoration: underline; }
 
         /* ===== CUSTOM POPUP ===== */
         .popup-overlay {
@@ -608,16 +512,13 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
             padding: 20px;
         }
 
-        .popup-overlay.show {
-            opacity: 1;
-            visibility: visible;
-        }
+        .popup-overlay.show { opacity: 1; visibility: visible; }
 
         .popup-box {
             background: #fff;
             border-radius: 18px;
             width: 100%;
-            max-width: 360px;
+            max-width: 380px;
             padding: 28px 26px 22px;
             text-align: center;
             box-shadow: 0 30px 70px rgba(48, 41, 35, .25);
@@ -643,15 +544,8 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
         }
 
         @keyframes popIcon {
-            0% {
-                transform: scale(.4);
-                opacity: 0;
-            }
-
-            100% {
-                transform: scale(1);
-                opacity: 1;
-            }
+            0%   { transform: scale(.4); opacity: 0; }
+            100% { transform: scale(1);  opacity: 1; }
         }
 
         .popup-icon.success {
@@ -662,6 +556,11 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
         .popup-icon.error {
             background: linear-gradient(135deg, #b51f2c 0%, #8e1722 100%);
             box-shadow: 0 8px 20px rgba(181, 31, 44, .35);
+        }
+
+        .popup-icon.info {
+            background: linear-gradient(135deg, #f9a825 0%, #ef6c00 100%);
+            box-shadow: 0 8px 20px rgba(249, 168, 37, .35);
         }
 
         .popup-title {
@@ -675,7 +574,7 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
         .popup-msg {
             font-size: 12.5px;
             color: #817a71;
-            line-height: 1.5;
+            line-height: 1.55;
             margin: 0 0 20px;
         }
 
@@ -703,84 +602,38 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
             box-shadow: 0 6px 16px rgba(181, 31, 44, .3);
         }
 
-        .popup-btn:hover {
-            transform: translateY(-1px);
-            filter: brightness(1.05);
+        .popup-btn.info {
+            background: linear-gradient(135deg, #f9a825 0%, #ef6c00 100%);
+            box-shadow: 0 6px 16px rgba(249, 168, 37, .3);
         }
 
-        .popup-btn:active {
-            transform: translateY(0);
-        }
+        .popup-btn:hover  { transform: translateY(-1px); filter: brightness(1.05); }
+        .popup-btn:active { transform: translateY(0); }
 
+        /* MOBILE */
         @media (max-width: 860px) {
             .login-wrap {
                 grid-template-columns: 1fr;
                 min-height: auto;
                 max-width: 460px;
             }
-
-            .side-left {
-                padding: 36px 28px 30px;
-                min-height: auto;
-            }
-
-            .brand-logo-big {
-                width: 96px;
-                height: 96px;
-                border-radius: 24px;
-            }
-
-            .brand-logo-big::before {
-                border-radius: 24px;
-            }
-
-            .brand-logo-big .fallback {
-                font-size: 48px;
-            }
-
-            .side-left-tag {
-                margin-top: 18px;
-            }
-
-            .feature-list {
-                display: none;
-            }
-
-            .side-right {
-                padding: 32px 26px 28px;
-            }
+            .side-left { padding: 36px 28px 30px; min-height: auto; }
+            .brand-logo-big { width: 96px; height: 96px; border-radius: 24px; }
+            .brand-logo-big::before { border-radius: 24px; }
+            .brand-logo-big .fallback { font-size: 48px; }
+            .side-left-tag { margin-top: 18px; }
+            .feature-list { display: none; }
+            .side-right { padding: 30px 24px 26px; }
         }
 
         @media (max-width: 480px) {
-            body {
-                padding: 12px;
-            }
-
-            .login-wrap {
-                border-radius: 20px;
-            }
-
-            .side-left {
-                padding: 28px 22px 24px;
-            }
-
-            .side-right {
-                padding: 26px 22px 22px;
-            }
-
-            .form-head h1 {
-                font-size: 22px;
-            }
-
-            .brand-logo-big {
-                width: 84px;
-                height: 84px;
-                border-radius: 20px;
-            }
-
-            .brand-logo-big::before {
-                border-radius: 20px;
-            }
+            body { padding: 12px; }
+            .login-wrap { border-radius: 20px; }
+            .side-left { padding: 28px 22px 24px; }
+            .side-right { padding: 24px 20px 20px; }
+            .form-head h1 { font-size: 20px; }
+            .brand-logo-big { width: 84px; height: 84px; border-radius: 20px; }
+            .brand-logo-big::before { border-radius: 20px; }
         }
     </style>
 </head>
@@ -806,9 +659,9 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
             <div class="side-left-tag">Delivery Boy</div>
 
             <ul class="feature-list">
-                <li><i class="bi bi-truck"></i> Assigned orders in real time</li>
-                <li><i class="bi bi-geo-alt"></i> Live delivery tracking</li>
-                <li><i class="bi bi-check2-circle"></i> One-tap delivery confirm</li>
+                <li><i class="bi bi-person-plus"></i> Quick registration</li>
+                <li><i class="bi bi-shield-check"></i> Admin approval required</li>
+                <li><i class="bi bi-truck"></i> Start delivering after approval</li>
             </ul>
         </aside>
 
@@ -816,11 +669,25 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
         <section class="side-right">
 
             <div class="form-head">
-                <h1>Delivery Login</h1>
-                <p>Sign in with your mobile number and password.</p>
+                <h1>Delivery Register</h1>
+                <p>Create your account. Admin will approve it shortly.</p>
             </div>
 
-            <form id="loginForm" novalidate>
+            <form id="registerForm" novalidate>
+
+                <div class="form-group">
+                    <label>Full Name</label>
+                    <div class="input-wrap">
+                        <i class="bi bi-person"></i>
+                        <input type="text"
+                            id="full_name"
+                            name="full_name"
+                            placeholder="Enter your full name"
+                            maxlength="100"
+                            autocomplete="name"
+                            required>
+                    </div>
+                </div>
 
                 <div class="form-group">
                     <label>Mobile Number</label>
@@ -831,7 +698,7 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
                             name="mobile_number"
                             placeholder="Enter 10-digit mobile"
                             maxlength="15"
-                            autocomplete="username"
+                            autocomplete="tel"
                             spellcheck="false"
                             required>
                     </div>
@@ -844,9 +711,9 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
                         <input type="password"
                             id="password"
                             name="password"
-                            placeholder="Enter password"
+                            placeholder="Create a password"
                             maxlength="100"
-                            autocomplete="current-password"
+                            autocomplete="new-password"
                             required>
                         <button type="button" class="eye-btn" id="togglePwd" aria-label="Show password">
                             <i class="bi bi-eye" id="eyeIcon"></i>
@@ -854,16 +721,34 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
                     </div>
                 </div>
 
-                <div class="row-between">
-                    <a href="#" class="link-forgot" id="forgotLink">Forgot password?</a>
+                <div class="form-group">
+                    <label>Confirm Password</label>
+                    <div class="input-wrap">
+                        <i class="bi bi-lock-fill"></i>
+                        <input type="password"
+                            id="confirm_password"
+                            name="confirm_password"
+                            placeholder="Re-enter password"
+                            maxlength="100"
+                            autocomplete="new-password"
+                            required>
+                        <button type="button" class="eye-btn" id="togglePwd2" aria-label="Show password">
+                            <i class="bi bi-eye" id="eyeIcon2"></i>
+                        </button>
+                    </div>
                 </div>
 
-                <button type="submit" class="btn-login" id="loginBtn">
-                    <i class="bi bi-box-arrow-in-right"></i>
-                    <span id="loginBtnText">Sign In</span>
+                <button type="submit" class="btn-register" id="registerBtn">
+                    <i class="bi bi-person-plus"></i>
+                    <span id="registerBtnText">Create Account</span>
                 </button>
 
             </form>
+
+            <div class="foot-note">
+                Already have an account?
+                <a href="<?= BASE_URL ?>login.php">Sign in</a>
+            </div>
 
         </section>
 
@@ -885,7 +770,7 @@ $siteName = $settings['username'] ?? 'Mrs Mill@';
         window.BASE_URL  = "<?= BASE_URL ?>";
         window.ADMIN_URL = "<?= ADMIN_URL ?>";
     </script>
-    <script src="<?= BASE_URL ?>js/login.js"></script>
+    <script src="<?= BASE_URL ?>js/register.js"></script>
 
 </body>
 
