@@ -377,3 +377,8 @@ if (!function_exists('jsonResponse')) {
         exit;
     }
 }
+//---------------------------------------------------------------------------------//
+$settings = getSettings($pdo);
+$siteName = $settings['username'] ?? 'Mrs Mill@';
+$logoUrl  = !empty($settings['logo_image']) ? ADMIN_URL . $settings['logo_image'] : '';
+//---------------------------------------------------------------------------------//

@@ -26,24 +26,11 @@
                     Dashboard
                 </a>
             </li>
-            <li>
-                <a href="<?= BASE_URL ?>take-order.php">
-                    <i class="bi bi-bag-plus"></i>
-                   Take Order 
-                </a>
-            </li>
 
             <li>
-                <a href="<?= BASE_URL ?>orders.php">
+                <a href="<?= BASE_URL ?>my-delivery.php">
                     <i class="bi bi-bag-check"></i>
-                    My Orders
-                    <span class="badge">0</span>
-                </a>
-            </li>
-            <li>
-                <a href="<?= BASE_URL ?>active.php">
-                    <i class="bi bi-truck"></i>
-                    Active Delivery
+                    My Delivery
                 </a>
             </li>
             <li>
@@ -52,11 +39,25 @@
                     History
                 </a>
             </li>
+            <li>
+                <a href="<?= BASE_URL ?>take-order.php">
+                    <i class="bi bi-bag-plus"></i>
+                    Take Order
+                </a>
+            </li>
+            <li>
+                <a href="<?= BASE_URL ?>orders.php">
+                    <i class="bi bi-bag-check"></i>
+                    My Orders
+                    <span class="badge">0</span>
+                </a>
+            </li>
+
 
             <div class="sb-nav-title">Account</div>
 
             <li>
-                <a href="<?= BASE_URL ?>profile.php">
+                <a href="<?= BASE_URL ?>settings.php">
                     <i class="bi bi-person-circle"></i>
                     My Profile
                 </a>
