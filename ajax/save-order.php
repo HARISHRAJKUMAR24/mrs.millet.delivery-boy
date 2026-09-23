@@ -3,7 +3,8 @@
    MRS MILL@ — SAVE ORDER (delivery boy)
    File: ./ajax/save-order.php
    Saves order as PENDING (payment_status = unpaid)
-   Returns UPI string for QR code.
+   Container details are saved ONLY in order_containers table.
+   Container is NOT added to the order subtotal / total_amount.
    ========================================================= */
 
 require_once __DIR__ . '/../config/config.php';
@@ -79,26 +80,29 @@ try {
         jsonResponse(false, 'Division is not valid for this apartment.');
     }
     $divisionCharge = $matchedCharge;
-
 } catch (PDOException $e) {
     jsonResponse(false, 'Server error. Please try again.');
 }
 
 /* ---------------- CLEAN PRODUCTS ---------------- */
-$cleanProducts = [];
-$subtotal = 0;
+$cleanProducts  = [];
+$subtotal       = 0;
 
 foreach ($products as $p) {
 
-    $pid       = (int)($p['product_id'] ?? 0);
-    $qty       = max(1, (int)($p['qty'] ?? 1));
-    $price     = (float)($p['price'] ?? 0);
-    $code      = trim((string)($p['code'] ?? ''));
-    $name      = trim((string)($p['name'] ?? ''));
-    $image     = trim((string)($p['image'] ?? ''));
-    $variantId = isset($p['variant_id']) && $p['variant_id'] !== null ? (int)$p['variant_id'] : null;
-    $variantNm = trim((string)($p['variant_name'] ?? ''));
-    $variantQty= trim((string)($p['variant_qty'] ?? ''));
+    $pid        = (int)($p['product_id'] ?? 0);
+    $qty        = max(1, (int)($p['qty'] ?? 1));
+    $price      = (float)($p['price'] ?? 0);
+    $code       = trim((string)($p['code'] ?? ''));
+    $name       = trim((string)($p['name'] ?? ''));
+    $image      = trim((string)($p['image'] ?? ''));
+    $variantId  = isset($p['variant_id']) && $p['variant_id'] !== null ? (int)$p['variant_id'] : null;
+    $variantNm  = trim((string)($p['variant_name'] ?? ''));
+    $variantQty = trim((string)($p['variant_qty'] ?? ''));
+
+    /* ---- Container fields (for order_containers only) ---- */
+    $containerEnabled = (int)($p['container_enabled'] ?? 0) === 1 ? 1 : 0;
+    $containerPrice   = (float)($p['container_price'] ?? 0);
 
     if ($pid <= 0 || $qty <= 0) continue;
 
@@ -128,17 +132,28 @@ foreach ($products as $p) {
     $lineTotal = $price * $qty;
     $subtotal += $lineTotal;
 
+    /* Container: per-line container charge (not added to subtotal) */
+    $containerLineTotal = 0;
+    if ($containerEnabled && $containerPrice > 0) {
+        $containerLineTotal = $containerPrice * $qty;
+    }
+
     $cleanProducts[] = [
-        'product_id'   => $pid,
-        'code'         => $code,
-        'name'         => $name,
-        'image'        => $image,
-        'variant_id'   => $variantId,
-        'variant_name' => $variantNm,
-        'variant_qty'  => $variantQty,
-        'price'        => $price,
-        'qty'          => $qty,
-        'line_total'   => $lineTotal
+        'product_id'           => $pid,
+        'code'                 => $code,
+        'name'                 => $name,
+        'image'                => $image,
+        'variant_id'           => $variantId,
+        'variant_name'         => $variantNm,
+        'variant_qty'          => $variantQty,
+        'price'                => $price,
+        'qty'                  => $qty,
+        'line_total'           => $lineTotal,
+
+        /* Container info (stored in JSON + order_containers, NOT in subtotal) */
+        'container_enabled'    => $containerEnabled,
+        'container_price'      => $containerEnabled ? $containerPrice : 0,
+        'container_line_total' => $containerLineTotal
     ];
 }
 
@@ -149,23 +164,27 @@ if (empty($cleanProducts)) {
 /* ---------------- GENERATE ORDER CODE ---------------- */
 try {
     $cStmt = $pdo->query(
-        "SELECT order_code FROM orders
-         WHERE order_code LIKE 'ORD%'
-         ORDER BY id DESC LIMIT 1"
+        "SELECT order_code
+         FROM orders
+         WHERE order_code REGEXP '^ORD[0-9]+$'
+         ORDER BY CAST(SUBSTRING(order_code, 4) AS UNSIGNED) DESC
+         LIMIT 1"
     );
+
     $last = $cStmt->fetch();
 
-    if ($last && preg_match('/ORD(\d+)/', $last['order_code'], $m)) {
+    if ($last && preg_match('/^ORD(\d+)$/i', $last['order_code'], $m)) {
         $nextNum = (int)$m[1] + 1;
     } else {
         $nextNum = 1;
     }
-    $orderCode = 'ORD' . str_pad($nextNum, 6, '0', STR_PAD_LEFT);
 
+    $orderCode = 'ORD' . $nextNum;
 } catch (PDOException $e) {
-    $orderCode = 'ORD' . time();
+    $orderCode = 'ORD1';
 }
 
+/* Order total = subtotal + delivery charge (container NOT included) */
 $total = $subtotal + $divisionCharge;
 
 /* ---------------- SETTINGS → UPI ---------------- */
@@ -179,18 +198,22 @@ if ($upiId === '') {
 
 /* ---------------- BUILD UPI STRING ---------------- */
 $upiParams = [
-    'pa' => $upiId,                          // payee address (UPI ID)
-    'pn' => $siteName,                       // payee name
-    'am' => number_format($total, 2, '.', ''), // amount
-    'cu' => 'INR',                           // currency
-    'tn' => 'Order ' . $orderCode            // transaction note
+    'pa' => $upiId,
+    'pn' => $siteName,
+    'am' => number_format($total, 2, '.', ''),
+    'cu' => 'INR',
+    'tn' => 'Order ' . $orderCode
 ];
 
 $upiString = 'upi://pay?' . http_build_query($upiParams);
-$upiLink   = $upiString; /* same — could also use a QR generator on frontend */
+$upiLink   = $upiString;
 
 /* ---------------- INSERT ---------------- */
 try {
+
+    $pdo->beginTransaction();
+
+    /* ✅ REMOVED: container_total_amount, containers_balance */
     $insert = $pdo->prepare(
         "INSERT INTO orders
             (order_code, delivery_boy_id,
@@ -220,17 +243,70 @@ try {
         $upiString
     ]);
 
+    /* ---- Grab order ID ONCE ---- */
     $orderId = (int)$pdo->lastInsertId();
 
+    /* =========================================
+       AUTO-CREATE CONTAINER RECORDS
+       (This is now the ONLY place container data is stored)
+       ========================================= */
+    $containerTotal = 0;
+
+    if ($orderId > 0) {
+
+        $cInsert = $pdo->prepare(
+            "INSERT INTO order_containers
+                (order_id, order_code, customer_name, customer_mobile,
+                 product_id, product_code, product_name,
+                 variant_id, variant_name,
+                 container_price, qty_issued, qty_returned,
+                 amount_refunded, refund_pending, refund_mode,
+                 status, issued_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 'none', 'issued', NOW())"
+        );
+
+        foreach ($cleanProducts as $cp) {
+            if (
+                (int)$cp['container_enabled'] === 1 &&
+                (float)$cp['container_price'] > 0 &&
+                (float)$cp['container_line_total'] > 0
+            ) {
+                $cInsert->execute([
+                    $orderId,
+                    $orderCode,
+                    $customerName,
+                    $customerMobile,
+                    $cp['product_id'],
+                    $cp['code'],
+                    $cp['name'],
+                    $cp['variant_id'],
+                    $cp['variant_name'],
+                    (float)$cp['container_price'],
+                    (int)$cp['qty']
+                ]);
+
+                $containerTotal += (float)$cp['container_line_total'];
+            }
+        }
+    }
+
+    $pdo->commit();
+
     jsonResponse(true, 'Order created. Waiting for payment.', [
-        'order_id'   => $orderId,
-        'order_code' => $orderCode,
-        'total'      => $total,
-        'upi_string' => $upiString,
-        'upi_link'   => $upiLink,
-        'payee_name' => $siteName
+        'order_id'        => $orderId,
+        'order_code'      => $orderCode,
+        'total'           => $total,
+        'container_total' => $containerTotal,
+        'upi_string'      => $upiString,
+        'upi_link'        => $upiLink,
+        'payee_name'      => $siteName
     ]);
 
 } catch (PDOException $e) {
+
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+
     jsonResponse(false, 'Failed to place order: ' . $e->getMessage());
 }

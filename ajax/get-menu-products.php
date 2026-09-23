@@ -1,5 +1,5 @@
 <?php
-/* Returns products from the currently active menu (with variants). */
+/* Returns products from the currently active menu (with container fields). */
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../config/function.php';
 
@@ -10,7 +10,7 @@ if (!isset($_SESSION['delivery_boy_id']) || (int)$_SESSION['delivery_boy_id'] <=
 }
 
 try {
-    /* Find active menu (status=1 and current time between start & end) */
+    /* Find active menu */
     $menuStmt = $pdo->prepare(
         "SELECT menu_code FROM menus
          WHERE status = 1
@@ -42,9 +42,9 @@ try {
 
     foreach ($products as $p) {
 
-        /* Get all variants for this product that are in the menu */
         $vStmt = $pdo->prepare(
-            "SELECT v.id, v.quantity, v.quantity_unit, v.quantity_name, v.price
+            "SELECT v.id, v.quantity, v.quantity_unit, v.quantity_name, v.price,
+                    v.container_enabled, v.container_price
              FROM menu_products mp
              INNER JOIN product_variants v ON v.id = mp.variant_id
              WHERE mp.menu_code = ? AND mp.product_code = ? AND v.status = 1
@@ -56,11 +56,13 @@ try {
         $variantList = [];
         foreach ($variants as $v) {
             $variantList[] = [
-                'id'            => (int)$v['id'],
-                'quantity'      => (float)$v['quantity'],
-                'quantity_unit' => $v['quantity_unit'],
-                'quantity_name' => $v['quantity_name'],
-                'price'         => (float)$v['price']
+                'id'                => (int)$v['id'],
+                'quantity'          => (float)$v['quantity'],
+                'quantity_unit'     => $v['quantity_unit'],
+                'quantity_name'     => $v['quantity_name'],
+                'price'             => (float)$v['price'],
+                'container_enabled' => (int)($v['container_enabled'] ?? 0),
+                'container_price'   => (float)($v['container_price'] ?? 0)
             ];
         }
 

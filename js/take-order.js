@@ -2,7 +2,8 @@
    MRS MILL@ — TAKE ORDER (delivery boy panel)
    File: ./js/take-order.js
    Tabs (Menu / All), variant picker, cart, UPI QR with logo,
-   confirm payment.
+   live search suggestions, confirm payment.
+   Container fields flow through the whole flow.
    ========================================================= */
 
 (function () {
@@ -13,52 +14,51 @@
         : "./";
 
     /* ---------------- DOM ---------------- */
-    const form        = document.getElementById("orderForm");
-    const saveBtn     = document.getElementById("saveBtn");
-    const saveText    = document.getElementById("saveBtnText");
+    const form = document.getElementById("orderForm");
+    const saveBtn = document.getElementById("saveBtn");
+    const saveText = document.getElementById("saveBtnText");
 
-    const custName    = document.getElementById("customer_name");
-    const custMobile  = document.getElementById("customer_mobile");
-    const aptIdInput  = document.getElementById("apartment_id");
-    const divNameInp  = document.getElementById("division_name");
-    const divChargeInp= document.getElementById("division_charge");
+    const custName = document.getElementById("customer_name");
+    const custMobile = document.getElementById("customer_mobile");
+    const aptIdInput = document.getElementById("apartment_id");
+    const divNameInp = document.getElementById("division_name");
+    const divChargeInp = document.getElementById("division_charge");
 
     const productSearch = document.getElementById("productSearch");
-    const productGrid   = document.getElementById("productGrid");
+    const productSuggest = document.getElementById("productSuggest");
+    const productGrid = document.getElementById("productGrid");
 
-    const cartList    = document.getElementById("cartList");
-    const cartCount   = document.getElementById("cartCount");
+    const cartList = document.getElementById("cartList");
+    const cartCount = document.getElementById("cartCount");
     const subtotalTxt = document.getElementById("subtotalText");
     const deliveryTxt = document.getElementById("deliveryText");
-    const totalTxt    = document.getElementById("totalText");
+    const totalTxt = document.getElementById("totalText");
 
     const successOverlay = document.getElementById("successOverlay");
-    const successText    = document.getElementById("successText");
-    const successCode    = document.getElementById("successCode");
-    const errorOverlay   = document.getElementById("errorOverlay");
-    const errorText      = document.getElementById("errorText");
-    const errorOkBtn     = document.getElementById("errorOkBtn");
+    const successText = document.getElementById("successText");
+    const successCode = document.getElementById("successCode");
+    const errorOverlay = document.getElementById("errorOverlay");
+    const errorText = document.getElementById("errorText");
+    const errorOkBtn = document.getElementById("errorOkBtn");
 
     /* Variant modal */
     const vOverlay = document.getElementById("variantOverlay");
-    const vThumb   = document.getElementById("vThumb");
-    const vName    = document.getElementById("vName");
-    const vCode    = document.getElementById("vCode");
-    const vList    = document.getElementById("vList");
-    const vCancel  = document.getElementById("vCancel");
-    const vAdd     = document.getElementById("vAdd");
+    const vThumb = document.getElementById("vThumb");
+    const vName = document.getElementById("vName");
+    const vCode = document.getElementById("vCode");
+    const vList = document.getElementById("vList");
+    const vCancel = document.getElementById("vCancel");
+    const vAdd = document.getElementById("vAdd");
 
     /* UPI modal */
-    const upiOverlay    = document.getElementById("upiOverlay");
-    const upiOrderCode  = document.getElementById("upiOrderCode");
-    const upiAmount     = document.getElementById("upiAmount");
-    const upiQrBox      = document.getElementById("upiQrBox");
-    const qrLogo        = document.getElementById("qrLogo");
-    const upiOpenApp    = document.getElementById("upiOpenApp");
-    const upiCopyLink   = document.getElementById("upiCopyLink");
-    const upiCancelBtn  = document.getElementById("upiCancelBtn");
+    const upiOverlay = document.getElementById("upiOverlay");
+    const upiOrderCode = document.getElementById("upiOrderCode");
+    const upiAmount = document.getElementById("upiAmount");
+    const upiQrBox = document.getElementById("upiQrBox");
+    const qrLogo = document.getElementById("qrLogo");
+    const upiCancelBtn = document.getElementById("upiCancelBtn");
     const upiConfirmBtn = document.getElementById("upiConfirmBtn");
-    const upiConfirmText= document.getElementById("upiConfirmText");
+    const upiConfirmText = document.getElementById("upiConfirmText");
 
     if (!form) return;
 
@@ -66,10 +66,15 @@
     const state = {
         tab: "menu",
         productsMenu: [],
-        productsAll:  [],
+        productsAll: [],
         cart: [],
-        searchTerm: "",
         pendingVariant: null,
+
+        /* Suggestions */
+        suggestItems: [],
+        suggestActiveIdx: -1,
+        suggestTimer: null,
+        suggestReqId: 0,
 
         /* UPI */
         pendingOrderId: 0,
@@ -89,6 +94,13 @@
             .replace(/</g, "&lt;")
             .replace(/>/g, "&gt;")
             .replace(/"/g, "&quot;");
+    }
+
+    function highlightMatch(text, query) {
+        const safe = escapeHtml(text);
+        if (!query) return safe;
+        const q = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        return safe.replace(new RegExp("(" + q + ")", "gi"), "<mark>$1</mark>");
     }
 
     function showError(msg) {
@@ -194,7 +206,7 @@
             const opt = e.target.closest(".sd-option");
             if (!opt) return;
 
-            const id   = opt.dataset.id || "";
+            const id = opt.dataset.id || "";
             const name = opt.dataset.name || "";
 
             dd.list.querySelectorAll(".sd-option").forEach(o => o.classList.remove("selected"));
@@ -251,7 +263,7 @@
                     <div class="sd-option"
                          data-id="${escapeHtml(a.id)}"
                          data-name="${escapeHtml(a.apartment_name)}"
-                         data-search="${escapeHtml((a.apartment_name||'') + ' ' + (a.apartment_code||''))}">
+                         data-search="${escapeHtml((a.apartment_name || '') + ' ' + (a.apartment_code || ''))}">
                         <i class="bi bi-building"></i>
                         <div class="name">
                             ${escapeHtml(a.apartment_name)}
@@ -302,27 +314,33 @@
     }
 
     /* =====================================================
-       PRODUCT TABS + LOAD
+       PRODUCT TABS
     ===================================================== */
     document.querySelectorAll(".pd-tab").forEach(tab => {
         tab.addEventListener("click", function () {
             document.querySelectorAll(".pd-tab").forEach(t => t.classList.remove("active"));
             tab.classList.add("active");
             state.tab = tab.dataset.tab;
+
+            if (productSearch) productSearch.value = "";
+            closeSuggest();
             renderProducts();
         });
     });
 
+    /* =====================================================
+       LOAD PRODUCTS (grid)
+    ===================================================== */
     function loadProducts() {
         productGrid.innerHTML = '<div class="pd-empty"><i class="bi bi-hourglass-split"></i>Loading products...</div>';
 
         Promise.all([
             fetch(BASE_URL + "ajax/get-menu-products.php", { credentials: "same-origin" }).then(r => r.json().catch(() => null)),
-            fetch(BASE_URL + "ajax/get-all-products.php",  { credentials: "same-origin" }).then(r => r.json().catch(() => null))
+            fetch(BASE_URL + "ajax/get-all-products.php", { credentials: "same-origin" }).then(r => r.json().catch(() => null))
         ])
             .then(([menuData, allData]) => {
                 state.productsMenu = (menuData && menuData.success && Array.isArray(menuData.data)) ? menuData.data : [];
-                state.productsAll  = (allData  && allData.success  && Array.isArray(allData.data))  ? allData.data  : [];
+                state.productsAll = (allData && allData.success && Array.isArray(allData.data)) ? allData.data : [];
                 renderProducts();
             })
             .catch(() => {
@@ -330,19 +348,13 @@
             });
     }
 
+    /* =====================================================
+       RENDER PRODUCT GRID
+    ===================================================== */
     function renderProducts() {
         const list = state.tab === "menu" ? state.productsMenu : state.productsAll;
-        const q = (state.searchTerm || "").trim().toLowerCase();
 
-        let filtered = list;
-        if (q) {
-            filtered = list.filter(p => {
-                const hay = ((p.name || "") + " " + (p.code || "")).toLowerCase();
-                return hay.includes(q);
-            });
-        }
-
-        if (!filtered.length) {
+        if (!list.length) {
             productGrid.innerHTML = `
                 <div class="pd-empty">
                     <i class="bi bi-box"></i>
@@ -351,7 +363,7 @@
             return;
         }
 
-        productGrid.innerHTML = filtered.map(p => {
+        productGrid.innerHTML = list.map(p => {
 
             const thumb = p.image
                 ? `<img src="${escapeHtml(p.image)}" alt="" onerror="this.style.display='none';this.parentElement.innerHTML='📦';">`
@@ -386,16 +398,198 @@
         const product = list.find(p => String(p.id) === String(id));
         if (!product) return;
 
+        handleProductClick(product);
+    });
+
+    function handleProductClick(product) {
         if (Array.isArray(product.variants) && product.variants.length > 0) {
             openVariantModal(product);
         } else {
             addToCart(product, null);
         }
-    });
+    }
 
-    productSearch.addEventListener("input", function () {
-        state.searchTerm = productSearch.value;
-        renderProducts();
+    /* =====================================================
+       LIVE PRODUCT SEARCH SUGGESTIONS
+    ===================================================== */
+    function closeSuggest() {
+        if (!productSuggest) return;
+        productSuggest.classList.remove("show");
+        state.suggestActiveIdx = -1;
+    }
+
+    function openSuggest() {
+        if (!productSuggest) return;
+        productSuggest.classList.add("show");
+    }
+
+    function renderSuggest(items, query) {
+        if (!productSuggest) return;
+
+        state.suggestItems = items;
+        state.suggestActiveIdx = -1;
+
+        if (!items.length) {
+            productSuggest.innerHTML = `
+                <div class="pd-suggest-empty">
+                    <i class="bi bi-search"></i>
+                    No matching products for "<strong>${escapeHtml(query)}</strong>"
+                </div>`;
+            openSuggest();
+            return;
+        }
+
+        productSuggest.innerHTML = `
+            <div class="pd-suggest-list">
+                ${items.map((p, idx) => {
+
+                    const thumb = p.image
+                        ? `<img src="${escapeHtml(p.image)}" alt="" onerror="this.style.display='none';this.parentElement.innerHTML='📦';">`
+                        : '📦';
+
+                    const minPrice = p.price
+                        ? ` · <span class="price">from ₹${Number(p.price).toFixed(2)}</span>`
+                        : '';
+
+                    const vcount = Array.isArray(p.variants) ? p.variants.length : 0;
+                    const vbadge = vcount > 1 ? ` · ${vcount} sizes` : '';
+
+                    return `
+                        <div class="pd-suggest-item"
+                             data-idx="${idx}"
+                             data-id="${escapeHtml(p.id)}">
+                            <div class="pd-suggest-thumb">${thumb}</div>
+                            <div class="pd-suggest-info">
+                                <div class="pd-suggest-name">${highlightMatch(p.name, query)}</div>
+                                <div class="pd-suggest-meta">#${escapeHtml(p.code || '')}${minPrice}${vbadge}</div>
+                            </div>
+                            <div class="pd-suggest-add">
+                                <i class="bi bi-plus-lg"></i>
+                            </div>
+                        </div>
+                    `;
+                }).join("")}
+            </div>
+        `;
+        openSuggest();
+    }
+
+    function fetchSuggestions(query) {
+
+        const reqId = ++state.suggestReqId;
+
+        productSuggest.innerHTML = `
+            <div class="pd-suggest-loading">
+                <span class="dots"></span> Searching...
+            </div>`;
+        openSuggest();
+
+        const url = BASE_URL + "ajax/search-products.php?q=" +
+            encodeURIComponent(query) +
+            "&tab=" + encodeURIComponent(state.tab);
+
+        fetch(url, { credentials: "same-origin" })
+            .then(r => r.json().catch(() => null))
+            .then(data => {
+
+                if (reqId !== state.suggestReqId) return;
+
+                if (!data || !data.success || !Array.isArray(data.data)) {
+                    productSuggest.innerHTML = `
+                        <div class="pd-suggest-empty">
+                            <i class="bi bi-exclamation-circle"></i>
+                            Search failed. Please try again.
+                        </div>`;
+                    return;
+                }
+
+                renderSuggest(data.data, query);
+            })
+            .catch(() => {
+                if (reqId !== state.suggestReqId) return;
+                productSuggest.innerHTML = `
+                    <div class="pd-suggest-empty">
+                        <i class="bi bi-wifi-off"></i>
+                        Unable to connect.
+                    </div>`;
+            });
+    }
+
+    /* ---------- Search input handler (debounced) ---------- */
+    if (productSearch) {
+        productSearch.addEventListener("input", function () {
+
+            const q = productSearch.value.trim();
+
+            clearTimeout(state.suggestTimer);
+
+            if (q.length < 1) {
+                closeSuggest();
+                return;
+            }
+
+            state.suggestTimer = setTimeout(() => {
+                fetchSuggestions(q);
+            }, 180);
+        });
+
+        /* Keyboard nav */
+        productSearch.addEventListener("keydown", function (e) {
+
+            if (!productSuggest.classList.contains("show")) return;
+
+            const items = productSuggest.querySelectorAll(".pd-suggest-item");
+            if (!items.length) return;
+
+            if (e.key === "ArrowDown") {
+                e.preventDefault();
+                state.suggestActiveIdx = Math.min(state.suggestActiveIdx + 1, items.length - 1);
+                paintActive(items);
+            } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                state.suggestActiveIdx = Math.max(state.suggestActiveIdx - 1, 0);
+                paintActive(items);
+            } else if (e.key === "Enter") {
+                if (state.suggestActiveIdx >= 0) {
+                    e.preventDefault();
+                    items[state.suggestActiveIdx].click();
+                }
+            } else if (e.key === "Escape") {
+                closeSuggest();
+                productSearch.blur();
+            }
+        });
+    }
+
+    function paintActive(items) {
+        items.forEach((el, i) => {
+            el.classList.toggle("active", i === state.suggestActiveIdx);
+        });
+        if (state.suggestActiveIdx >= 0 && items[state.suggestActiveIdx]) {
+            items[state.suggestActiveIdx].scrollIntoView({ block: "nearest" });
+        }
+    }
+
+    /* ---------- Click on suggestion ---------- */
+    if (productSuggest) {
+        productSuggest.addEventListener("click", function (e) {
+            const item = e.target.closest(".pd-suggest-item");
+            if (!item) return;
+
+            const idx = Number(item.dataset.idx);
+            const product = state.suggestItems[idx];
+            if (!product) return;
+
+            handleProductClick(product);
+
+            closeSuggest();
+            if (productSearch) productSearch.value = "";
+        });
+    }
+
+    /* ---------- Close on outside click ---------- */
+    document.addEventListener("click", function (e) {
+        if (!e.target.closest(".pd-search-wrap")) closeSuggest();
     });
 
     /* =====================================================
@@ -415,17 +609,31 @@
         vName.textContent = product.name;
         vCode.textContent = "#" + (product.code || '');
 
-        vList.innerHTML = product.variants.map(v => `
-            <div class="variant-option ${String(v.id) === String(state.pendingVariant.selectedVariantId) ? 'selected' : ''}"
-                 data-vid="${escapeHtml(v.id)}">
-                <div class="variant-radio"></div>
-                <div class="variant-body">
-                    <div class="variant-name">${escapeHtml(v.quantity_name || v.quantity + ' ' + v.quantity_unit)}</div>
-                    <div class="variant-qty">${escapeHtml(v.quantity)} ${escapeHtml(v.quantity_unit)}</div>
+        vList.innerHTML = product.variants.map(v => {
+
+            const hasContainer = Number(v.container_enabled || 0) === 1
+                && Number(v.container_price || 0) > 0;
+
+            const containerLine = hasContainer
+                ? `<div class="variant-container-note">
+                       <i class="bi bi-box2-heart"></i>
+                       Container +₹${Number(v.container_price).toFixed(2)}
+                   </div>`
+                : '';
+
+            return `
+                <div class="variant-option ${String(v.id) === String(state.pendingVariant.selectedVariantId) ? 'selected' : ''}"
+                     data-vid="${escapeHtml(v.id)}">
+                    <div class="variant-radio"></div>
+                    <div class="variant-body">
+                        <div class="variant-name">${escapeHtml(v.quantity_name || v.quantity + ' ' + v.quantity_unit)}</div>
+                        <div class="variant-qty">${escapeHtml(v.quantity)} ${escapeHtml(v.quantity_unit)}</div>
+                        ${containerLine}
+                    </div>
+                    <div class="variant-price">₹${Number(v.price).toFixed(2)}</div>
                 </div>
-                <div class="variant-price">₹${Number(v.price).toFixed(2)}</div>
-            </div>
-        `).join("");
+            `;
+        }).join("");
 
         vOverlay.classList.add("show");
         vOverlay.setAttribute("aria-hidden", "false");
@@ -493,7 +701,11 @@
             variantName: variant ? (variant.quantity_name || (variant.quantity + ' ' + variant.quantity_unit)) : "",
             variantQty: variant ? (variant.quantity + ' ' + variant.quantity_unit) : "",
             price: price,
-            qty: 1
+            qty: 1,
+
+            /* Container info (from variant) */
+            containerEnabled: variant ? Number(variant.container_enabled || 0) : 0,
+            containerPrice: variant ? Number(variant.container_price || 0) : 0
         });
 
         renderCart();
@@ -522,6 +734,13 @@
 
             const variantLine = c.variantName ? ` · ${escapeHtml(c.variantName)}` : '';
 
+            const containerLine = (c.containerEnabled && c.containerPrice > 0)
+                ? `<div class="cart-container-note">
+                       <i class="bi bi-box2-heart"></i>
+                       Container +₹${Number(c.containerPrice).toFixed(2)}
+                   </div>`
+                : '';
+
             return `
                 <div class="cart-item" data-key="${escapeHtml(c.key)}">
                     <div class="cart-thumb">${thumb}</div>
@@ -530,6 +749,7 @@
                         <div class="cart-meta">
                             <span class="cart-price">${money(c.price)}</span>${variantLine}
                         </div>
+                        ${containerLine}
                     </div>
                     <div class="cart-qty">
                         <button type="button" data-act="dec"><i class="bi bi-dash"></i></button>
@@ -567,24 +787,21 @@
 
     function updateTotals() {
         const subtotal = state.cart.reduce((s, c) => s + (c.price * c.qty), 0);
-        const charge   = Number(divChargeInp.value || 0);
-        const total    = subtotal + charge;
+        const charge = Number(divChargeInp.value || 0);
+        const total = subtotal + charge;
 
         subtotalTxt.textContent = money(subtotal);
         deliveryTxt.textContent = money(charge);
-        totalTxt.textContent    = money(total);
+        totalTxt.textContent = money(total);
     }
 
     /* =====================================================
-       UPI QR MODAL (with logo overlay preserved)
+       UPI QR MODAL
     ===================================================== */
     function renderQr(upiString) {
         if (!upiQrBox) return;
 
-        /* Save the logo overlay HTML before we clear */
         const logoHtml = qrLogo ? qrLogo.outerHTML : "";
-
-        /* Reset the QR box (removes any old canvas), then re-append logo */
         upiQrBox.innerHTML = logoHtml;
 
         if (typeof QRCode === "undefined") {
@@ -596,7 +813,6 @@
         }
 
         try {
-            /* QR holder behind the logo */
             const qrHolder = document.createElement("div");
             qrHolder.style.width = "100%";
             qrHolder.style.height = "100%";
@@ -623,14 +839,12 @@
     }
 
     function openUpiModal(data) {
-        state.pendingOrderId    = data.order_id;
-        state.pendingOrderCode  = data.order_code;
-        state.pendingUpiString  = data.upi_string || "";
+        state.pendingOrderId = data.order_id;
+        state.pendingOrderCode = data.order_code;
+        state.pendingUpiString = data.upi_string || "";
 
         if (upiOrderCode) upiOrderCode.textContent = data.order_code || "";
-        if (upiAmount)    upiAmount.textContent    = money(data.total);
-
-        if (upiOpenApp) upiOpenApp.href = data.upi_link || data.upi_string || "#";
+        if (upiAmount) upiAmount.textContent = money(data.total);
 
         renderQr(state.pendingUpiString);
 
@@ -643,7 +857,6 @@
         upiOverlay.classList.remove("show");
         upiOverlay.setAttribute("aria-hidden", "true");
 
-        /* Keep the logo overlay for the next open */
         if (upiQrBox) {
             const logoHtml = qrLogo ? qrLogo.outerHTML : "";
             upiQrBox.innerHTML = logoHtml;
@@ -655,22 +868,6 @@
     if (upiOverlay) upiOverlay.addEventListener("click", e => {
         if (e.target === upiOverlay) closeUpiModal();
     });
-
-    /* Copy UPI link */
-    if (upiCopyLink) {
-        upiCopyLink.addEventListener("click", function (e) {
-            e.preventDefault();
-            if (!state.pendingUpiString) return;
-
-            navigator.clipboard.writeText(state.pendingUpiString)
-                .then(() => {
-                    const original = upiCopyLink.innerHTML;
-                    upiCopyLink.innerHTML = '<i class="bi bi-check-lg"></i> Copied';
-                    setTimeout(() => upiCopyLink.innerHTML = original, 1500);
-                })
-                .catch(() => {});
-        });
-    }
 
     /* Confirm payment */
     if (upiConfirmBtn) {
@@ -706,7 +903,6 @@
                             state.pendingOrderCode
                         );
 
-                        /* Reset form */
                         form.reset();
                         aptIdInput.value = "";
                         divNameInp.value = "";
@@ -735,45 +931,47 @@
     }
 
     /* =====================================================
-       SUBMIT — creates order, opens UPI modal
+       SUBMIT
     ===================================================== */
     form.addEventListener("submit", function (e) {
 
         e.preventDefault();
 
-        const name   = custName.value.trim();
+        const name = custName.value.trim();
         const mobile = custMobile.value.trim();
-        const aptId  = aptIdInput.value.trim();
-        const div    = divNameInp.value.trim();
+        const aptId = aptIdInput.value.trim();
+        const div = divNameInp.value.trim();
         const charge = divChargeInp.value.trim();
 
-        if (!name)   return showError("Customer name is required.");
+        if (!name) return showError("Customer name is required.");
         if (!mobile) return showError("Mobile number is required.");
         if (!/^[0-9]{10,15}$/.test(mobile))
             return showError("Mobile number must be 10–15 digits.");
-        if (!aptId)  return showError("Please select an apartment.");
-        if (!div)    return showError("Please select a division.");
+        if (!aptId) return showError("Please select an apartment.");
+        if (!div) return showError("Please select a division.");
         if (!state.cart.length)
             return showError("Please add at least one product.");
 
         setLoading(true);
 
         const payload = {
-            customer_name:   name,
+            customer_name: name,
             customer_mobile: mobile,
-            apartment_id:    aptId,
-            division:        div,
+            apartment_id: aptId,
+            division: div,
             division_charge: charge,
             products: state.cart.map(c => ({
-                product_id:   c.productId,
-                code:         c.code,
-                name:         c.name,
-                image:        c.image,
-                variant_id:   c.variantId,
+                product_id: c.productId,
+                code: c.code,
+                name: c.name,
+                image: c.image,
+                variant_id: c.variantId,
                 variant_name: c.variantName,
-                variant_qty:  c.variantQty,
-                price:        c.price,
-                qty:          c.qty
+                variant_qty: c.variantQty,
+                price: c.price,
+                qty: c.qty,
+                container_enabled: c.containerEnabled ? 1 : 0,
+                container_price: c.containerPrice || 0
             }))
         };
 

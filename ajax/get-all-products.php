@@ -1,5 +1,5 @@
 <?php
-/* Returns all active products with their variants. */
+/* Returns all active products with their variants (including container fields). */
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../config/function.php';
 
@@ -23,7 +23,8 @@ try {
     foreach ($products as $p) {
 
         $vStmt = $pdo->prepare(
-            "SELECT id, quantity, quantity_unit, quantity_name, price
+            "SELECT id, quantity, quantity_unit, quantity_name, price,
+                    container_enabled, container_price
              FROM product_variants
              WHERE product_code = ? AND status = 1
              ORDER BY quantity ASC"
@@ -34,11 +35,13 @@ try {
         $variantList = [];
         foreach ($variants as $v) {
             $variantList[] = [
-                'id'            => (int)$v['id'],
-                'quantity'      => (float)$v['quantity'],
-                'quantity_unit' => $v['quantity_unit'],
-                'quantity_name' => $v['quantity_name'],
-                'price'         => (float)$v['price']
+                'id'                => (int)$v['id'],
+                'quantity'          => (float)$v['quantity'],
+                'quantity_unit'     => $v['quantity_unit'],
+                'quantity_name'     => $v['quantity_name'],
+                'price'             => (float)$v['price'],
+                'container_enabled' => (int)($v['container_enabled'] ?? 0),
+                'container_price'   => (float)($v['container_price'] ?? 0)
             ];
         }
 

@@ -27,6 +27,13 @@
                 </a>
             </li>
             <li>
+                <a href="<?= BASE_URL ?>take-order.php">
+                    <i class="bi bi-bag-plus"></i>
+                   Take Order 
+                </a>
+            </li>
+
+            <li>
                 <a href="<?= BASE_URL ?>orders.php">
                     <i class="bi bi-bag-check"></i>
                     My Orders

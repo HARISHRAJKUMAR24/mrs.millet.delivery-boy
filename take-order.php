@@ -388,11 +388,16 @@ $firstName = explode(' ', trim($boy['full_name']))[0];
         }
 
         /* =====================================================
-           PRODUCT GRID
+           PRODUCT SEARCH + SUGGESTIONS WRAPPER
         ===================================================== */
-        .pd-search {
+        .pd-search-wrap {
             position: relative;
             margin-bottom: 14px;
+        }
+
+        .pd-search {
+            position: relative;
+            margin-bottom: 0;
         }
 
         .pd-search input {
@@ -425,6 +430,171 @@ $firstName = explode(' ', trim($boy['full_name']))[0];
             pointer-events: none;
         }
 
+        /* ---- Suggestion dropdown ---- */
+        .pd-suggest {
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 0;
+            right: 0;
+            background: #fff;
+            border: 1.5px solid #ece5da;
+            border-radius: 14px;
+            box-shadow: 0 20px 40px rgba(48, 41, 35, .12);
+            z-index: 40;
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(-6px);
+            transition: .18s ease;
+            overflow: hidden;
+            max-height: 380px;
+        }
+
+        .pd-suggest.show {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0);
+        }
+
+        .pd-suggest-list {
+            max-height: 340px;
+            overflow-y: auto;
+            padding: 6px;
+        }
+
+        .pd-suggest-list::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .pd-suggest-list::-webkit-scrollbar-thumb {
+            background: #e0d8cd;
+            border-radius: 4px;
+        }
+
+        .pd-suggest-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: .15s ease;
+        }
+
+        .pd-suggest-item:hover,
+        .pd-suggest-item.active {
+            background: #fbe8e9;
+        }
+
+        .pd-suggest-thumb {
+            width: 44px;
+            height: 44px;
+            border-radius: 10px;
+            background: #f7efe3;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            overflow: hidden;
+            font-size: 20px;
+        }
+
+        .pd-suggest-thumb img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .pd-suggest-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .pd-suggest-name {
+            font-size: 12.5px;
+            font-weight: 700;
+            color: #302923;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .pd-suggest-name mark {
+            background: #fff3c4;
+            color: #302923;
+            padding: 0 2px;
+            border-radius: 3px;
+        }
+
+        .pd-suggest-meta {
+            font-size: 10.5px;
+            color: #948c82;
+            margin-top: 2px;
+            font-weight: 600;
+        }
+
+        .pd-suggest-meta .price {
+            color: #b51f2c;
+            font-weight: 800;
+        }
+
+        .pd-suggest-add {
+            width: 30px;
+            height: 30px;
+            border-radius: 8px;
+            background: #b51f2c;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            flex-shrink: 0;
+            opacity: 0;
+            transform: scale(.8);
+            transition: .18s ease;
+        }
+
+        .pd-suggest-item:hover .pd-suggest-add,
+        .pd-suggest-item.active .pd-suggest-add {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        .pd-suggest-empty {
+            padding: 24px 18px;
+            text-align: center;
+            font-size: 12px;
+            color: #948c82;
+        }
+
+        .pd-suggest-empty i {
+            font-size: 24px;
+            color: #d5cbbd;
+            display: block;
+            margin-bottom: 6px;
+        }
+
+        .pd-suggest-loading {
+            padding: 18px;
+            text-align: center;
+            font-size: 12px;
+            color: #948c82;
+        }
+
+        .pd-suggest-loading .dots {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #ece5da;
+            border-top-color: #b51f2c;
+            border-radius: 50%;
+            animation: spin .7s linear infinite;
+            vertical-align: middle;
+            margin-right: 6px;
+        }
+
+        /* =====================================================
+           PRODUCT GRID
+        ===================================================== */
         .pd-grid {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
@@ -681,6 +851,8 @@ $firstName = explode(' ', trim($boy['full_name']))[0];
         .cart-price {
             color: #b51f2c;
             font-weight: 800;
+            font-family: "DM Sans", sans-serif;
+            letter-spacing: -.2px;
         }
 
         .cart-qty {
@@ -768,10 +940,11 @@ $firstName = explode(' ', trim($boy['full_name']))[0];
         }
 
         .cart-row.total strong {
-            font-family: "Playfair Display", serif;
+            font-family: "DM Sans", sans-serif;
             font-size: 17px;
             color: #b51f2c;
-            font-weight: 700;
+            font-weight: 800;
+            letter-spacing: -.3px;
         }
 
         .cart-actions {
@@ -999,6 +1172,43 @@ $firstName = explode(' ', trim($boy['full_name']))[0];
             display: flex;
             gap: 10px;
             margin-top: 20px;
+        }
+
+        /* Container note inside variant option */
+        .variant-container-note {
+            font-size: 10px;
+            color: #b8893c;
+            background: #fdf7ec;
+            border: 1px dashed #e8d5a8;
+            border-radius: 6px;
+            padding: 3px 7px;
+            margin-top: 5px;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            font-weight: 700;
+        }
+
+        .variant-container-note i {
+            font-size: 11px;
+        }
+
+        /* Container note inside cart item */
+        .cart-container-note {
+            font-size: 9.5px;
+            color: #b8893c;
+            background: #fdf7ec;
+            border-radius: 5px;
+            padding: 2px 6px;
+            margin-top: 4px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-weight: 700;
+        }
+
+        .cart-container-note i {
+            font-size: 10px;
         }
 
         /* Popups */
@@ -1230,15 +1440,16 @@ $firstName = explode(' ', trim($boy['full_name']))[0];
         }
 
         .upi-amount {
-            font-family: "Playfair Display", serif;
+            font-family: "DM Sans", sans-serif;
             font-size: 32px;
-            font-weight: 700;
+            font-weight: 800;
             color: #b51f2c;
             margin: 4px 0 18px;
             line-height: 1;
+            letter-spacing: -.5px;
         }
 
-        /* QR box — now positions the logo on top */
+        /* QR box — positions the logo on top */
         .upi-qr {
             width: 220px;
             height: 220px;
@@ -1297,35 +1508,6 @@ $firstName = explode(' ', trim($boy['full_name']))[0];
             font-weight: 700;
             font-size: 24px;
             line-height: 1;
-        }
-
-        .upi-apps {
-            display: flex;
-            gap: 8px;
-            justify-content: center;
-            margin-bottom: 16px;
-            flex-wrap: wrap;
-        }
-
-        .upi-apps a {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 8px 12px;
-            border-radius: 9px;
-            background: #fdfaf4;
-            border: 1.5px solid #ece5da;
-            color: #4e4841;
-            font-size: 11px;
-            font-weight: 700;
-            text-decoration: none;
-            transition: .2s;
-        }
-
-        .upi-apps a:hover {
-            background: #fbe8e9;
-            border-color: #d98a91;
-            color: #b51f2c;
         }
 
         .upi-note {
@@ -1533,9 +1715,13 @@ $firstName = explode(' ', trim($boy['full_name']))[0];
                                 </button>
                             </div>
 
-                            <div class="pd-search">
-                                <i class="bi bi-search"></i>
-                                <input type="text" id="productSearch" placeholder="Search product by name or code..." autocomplete="off">
+                            <!-- ✅ SEARCH WITH SUGGESTIONS WRAPPER -->
+                            <div class="pd-search-wrap">
+                                <div class="pd-search">
+                                    <i class="bi bi-search"></i>
+                                    <input type="text" id="productSearch" placeholder="Search product by name or code..." autocomplete="off">
+                                </div>
+                                <div class="pd-suggest" id="productSuggest"></div>
                             </div>
 
                             <div class="pd-grid" id="productGrid">
@@ -1649,7 +1835,6 @@ $firstName = explode(' ', trim($boy['full_name']))[0];
             <div class="upi-amount" id="upiAmount">₹0.00</div>
 
             <div class="upi-qr" id="upiQrBox">
-                <!-- Logo overlay — sits centered on top of the generated QR -->
                 <div class="qr-logo" id="qrLogo">
                     <?php if ($QRlogoUrl): ?>
                         <img src="<?= htmlspecialchars($QRlogoUrl) ?>" alt="Logo">
