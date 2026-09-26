@@ -1,9 +1,8 @@
 /* =========================================================
    MRS MILL@ — DELIVERY BOY "MY ORDERS"
    File: ./js/orders.js
-   Client-side pagination + per-page + search
+   Client-side pagination + per-page + search + date filter
    Row click → order-view.php?id=X
-   No "view" column — entire row is clickable
    ========================================================= */
 
 (function () {
@@ -17,6 +16,11 @@
     const tbody       = document.getElementById("orTbody");
     const searchInput = document.getElementById("orSearch");
     const tabs        = document.querySelectorAll(".or-tab");
+
+    const dateSelect  = document.getElementById("orDateFilter");
+    const dateFrom    = document.getElementById("orDateFrom");
+    const dateTo      = document.getElementById("orDateTo");
+    const dateCustom  = document.getElementById("orDateCustom");
 
     const paginationWrap     = document.getElementById("orPagination");
     const paginationInfo     = document.getElementById("paginationInfo");
@@ -33,6 +37,7 @@
     let filteredRows = [];
     let currentPage  = 1;
     let activeFilter = "all";
+    let activeDate   = "all";
     let searchTerm   = "";
 
     /* HELPERS */
@@ -99,7 +104,7 @@
         const initial = (o.customer_name || "?").trim().charAt(0).toUpperCase();
 
         return `
-            <tr data-id="${o.id}">
+            <tr data-id="${o.id}" data-href="${BASE_URL}order-view.php?id=${o.id}">
                 <td>
                     <div class="order-cell">
                         <div class="order-avatar">${escapeHtml(initial)}</div>
@@ -267,7 +272,7 @@
         });
     }
 
-    /* FILTER */
+    /* FILTER (client-side search) */
     function applyFilterAndRender(resetPage) {
         const q = (searchTerm || "").trim().toLowerCase();
 
@@ -300,8 +305,17 @@
             </tr>`;
         if (paginationWrap) paginationWrap.style.display = "none";
 
-        const url = BASE_URL + "ajax/my-orders.php?filter=" +
-                    encodeURIComponent(activeFilter) + "&q=";
+        const params = new URLSearchParams();
+        params.set("filter", activeFilter);
+        params.set("date",   activeDate);
+        params.set("q",      "");
+
+        if (activeDate === "custom") {
+            if (dateFrom && dateFrom.value) params.set("from", dateFrom.value);
+            if (dateTo   && dateTo.value)   params.set("to",   dateTo.value);
+        }
+
+        const url = BASE_URL + "ajax/my-orders.php?" + params.toString();
 
         fetch(url, { credentials: "same-origin" })
             .then(r => r.json().catch(() => null))
@@ -311,7 +325,7 @@
                     tbody.innerHTML = `
                         <tr>
                             <td colspan="7" style="text-align:center;padding:40px;color:#b51f2c;">
-                                Failed to load orders.
+                                ${escapeHtml((res && res.message) || "Failed to load orders.")}
                             </td>
                         </tr>`;
                     return;
@@ -350,6 +364,41 @@
             loadOrders();
         });
     });
+
+    /* DATE FILTER */
+    if (dateSelect) {
+        dateSelect.addEventListener("change", function () {
+            activeDate = this.value || "all";
+
+            if (dateCustom) {
+                dateCustom.style.display = (activeDate === "custom") ? "inline-flex" : "none";
+            }
+
+            if (activeDate !== "custom" ||
+                (dateFrom && dateFrom.value && dateTo && dateTo.value)) {
+                currentPage = 1;
+                loadOrders();
+            }
+        });
+    }
+
+    if (dateFrom) {
+        dateFrom.addEventListener("change", function () {
+            if (activeDate === "custom" && dateTo && dateTo.value) {
+                currentPage = 1;
+                loadOrders();
+            }
+        });
+    }
+
+    if (dateTo) {
+        dateTo.addEventListener("change", function () {
+            if (activeDate === "custom" && dateFrom && dateFrom.value) {
+                currentPage = 1;
+                loadOrders();
+            }
+        });
+    }
 
     /* SEARCH */
     let searchTimer = null;

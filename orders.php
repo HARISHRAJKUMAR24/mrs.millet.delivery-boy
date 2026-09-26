@@ -58,15 +58,30 @@ try {
         $stats['today']  = (int)$row['today'];
     }
 
+    /* ---- Pending containers (derived from products_json) ---- */
+    $pending = 0;
+
     $c = $pdo->prepare(
-        "SELECT COALESCE(SUM(oc.qty_issued - oc.qty_returned), 0)
-         FROM order_containers oc
-         INNER JOIN orders o ON o.id = oc.order_id
-         WHERE o.delivery_boy_id = ?
-           AND oc.status IN ('issued','partial')"
+        "SELECT products_json FROM orders WHERE delivery_boy_id = ?"
     );
     $c->execute([$boyId]);
-    $stats['pending_containers'] = (int)$c->fetchColumn();
+    $allRows = $c->fetchAll(PDO::FETCH_COLUMN);
+
+    foreach ($allRows as $json) {
+        $items = json_decode($json ?: '[]', true);
+        if (!is_array($items)) continue;
+
+        foreach ($items as $p) {
+            if ((int)($p['container_enabled'] ?? 0) !== 1) continue;
+
+            $issued   = (int)($p['qty'] ?? 0);
+            $returned = (int)($p['container_returned'] ?? 0);
+
+            $pending += max(0, $issued - $returned);
+        }
+    }
+
+    $stats['pending_containers'] = $pending;
 
 } catch (PDOException $e) {}
 ?>
@@ -172,6 +187,81 @@ try {
             box-shadow: 0 4px 12px rgba(48, 41, 35, .08);
         }
 
+        /* ---- Date filter ---- */
+        .or-date-filter {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            height: 40px;
+            background: #fff;
+            border: 1.5px solid #ece5da;
+            border-radius: 11px;
+            padding: 0 30px 0 34px;
+            transition: .2s ease;
+        }
+        .or-date-filter:focus-within {
+            border-color: #b51f2c;
+            box-shadow: 0 0 0 4px rgba(181,31,44,.08);
+        }
+        .or-date-filter > i {
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #b0a79c;
+            font-size: 14px;
+            pointer-events: none;
+        }
+        .or-date-filter select {
+            appearance: none;
+            -webkit-appearance: none;
+            border: none;
+            background: transparent;
+            font-family: "DM Sans", sans-serif;
+            font-size: 12px;
+            font-weight: 700;
+            color: #4e4841;
+            outline: none;
+            cursor: pointer;
+            padding-right: 18px;
+            height: 100%;
+        }
+        .or-date-filter::after {
+            content: "";
+            position: absolute;
+            right: 11px;
+            top: 50%;
+            width: 8px;
+            height: 8px;
+            border-right: 2px solid #b0a79c;
+            border-bottom: 2px solid #b0a79c;
+            transform: translateY(-70%) rotate(45deg);
+            pointer-events: none;
+        }
+        .or-date-custom {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            height: 40px;
+            background: #fff;
+            border: 1.5px solid #ece5da;
+            border-radius: 11px;
+            padding: 0 10px;
+            font-size: 11.5px;
+            color: #817a71;
+            font-weight: 600;
+        }
+        .or-date-custom input[type="date"] {
+            border: none;
+            background: transparent;
+            font-family: "DM Sans", sans-serif;
+            font-size: 11.5px;
+            color: #302923;
+            outline: none;
+            cursor: pointer;
+            font-weight: 700;
+        }
+
         .or-search {
             flex: 1;
             min-width: 220px;
@@ -254,7 +344,6 @@ try {
             vertical-align: middle;
         }
 
-        /* Order cell */
         .order-cell {
             display: flex;
             align-items: center;
@@ -289,7 +378,6 @@ try {
             margin-top: 2px;
         }
 
-        /* Customer */
         .cust-cell { min-width: 160px; }
 
         .cust-name {
@@ -314,7 +402,6 @@ try {
             font-size: 10px;
         }
 
-        /* Badges */
         .order-status,
         .payment-status {
             display: inline-block;
@@ -336,7 +423,6 @@ try {
         .pay-unpaid { background: #fff4d6; color: #8a6a1e; }
         .pay-failed { background: #fdeaea; color: #b51f2c; }
 
-        /* Amount */
         .amount-cell {
             font-family: "DM Sans", sans-serif;
             font-weight: 800;
@@ -346,7 +432,6 @@ try {
             letter-spacing: -.3px;
         }
 
-        /* Empty */
         .or-empty {
             text-align: center;
             padding: 60px 20px;
@@ -369,7 +454,6 @@ try {
 
         .or-empty p { margin: 0; font-size: 12px; }
 
-        /* Pagination */
         .or-pagination {
             display: flex;
             align-items: center;
@@ -472,7 +556,6 @@ try {
 
         .pagination-controls i { font-size: 12px; }
 
-        /* Responsive */
         @media (max-width: 1024px) {
             .or-stats { grid-template-columns: repeat(3, 1fr); }
         }
@@ -570,6 +653,24 @@ try {
                     <button class="or-tab" data-filter="paid">Paid</button>
                     <button class="or-tab" data-filter="unpaid">Unpaid</button>
                     <button class="or-tab" data-filter="today">Today</button>
+                </div>
+
+                <div class="or-date-filter">
+                    <i class="bi bi-calendar3"></i>
+                    <select id="orDateFilter">
+                        <option value="all">All Dates</option>
+                        <option value="today">Today</option>
+                        <option value="yesterday">Yesterday</option>
+                        <option value="week">Last 7 Days</option>
+                        <option value="month">This Month</option>
+                        <option value="custom">Custom Range</option>
+                    </select>
+                </div>
+
+                <div class="or-date-custom" id="orDateCustom" style="display:none;">
+                    <input type="date" id="orDateFrom">
+                    <span>to</span>
+                    <input type="date" id="orDateTo">
                 </div>
 
                 <div class="or-search">

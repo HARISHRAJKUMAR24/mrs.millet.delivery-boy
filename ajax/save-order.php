@@ -3,7 +3,7 @@
    MRS MILL@ — SAVE ORDER (delivery boy)
    File: ./ajax/save-order.php
    Saves order as PENDING (payment_status = unpaid)
-   Container details are saved ONLY in order_containers table.
+   Container details are stored INSIDE products_json only.
    Container is NOT added to the order subtotal / total_amount.
    ========================================================= */
 
@@ -87,6 +87,7 @@ try {
 /* ---------------- CLEAN PRODUCTS ---------------- */
 $cleanProducts  = [];
 $subtotal       = 0;
+$containerTotal = 0;
 
 foreach ($products as $p) {
 
@@ -100,7 +101,7 @@ foreach ($products as $p) {
     $variantNm  = trim((string)($p['variant_name'] ?? ''));
     $variantQty = trim((string)($p['variant_qty'] ?? ''));
 
-    /* ---- Container fields (for order_containers only) ---- */
+    /* ---- Container info (kept inside JSON only) ---- */
     $containerEnabled = (int)($p['container_enabled'] ?? 0) === 1 ? 1 : 0;
     $containerPrice   = (float)($p['container_price'] ?? 0);
 
@@ -132,10 +133,11 @@ foreach ($products as $p) {
     $lineTotal = $price * $qty;
     $subtotal += $lineTotal;
 
-    /* Container: per-line container charge (not added to subtotal) */
+    /* Container: per-line container charge (NOT added to subtotal) */
     $containerLineTotal = 0;
     if ($containerEnabled && $containerPrice > 0) {
         $containerLineTotal = $containerPrice * $qty;
+        $containerTotal    += $containerLineTotal;
     }
 
     $cleanProducts[] = [
@@ -150,7 +152,7 @@ foreach ($products as $p) {
         'qty'                  => $qty,
         'line_total'           => $lineTotal,
 
-        /* Container info (stored in JSON + order_containers, NOT in subtotal) */
+        /* Container info — stored INSIDE products_json, not a separate table */
         'container_enabled'    => $containerEnabled,
         'container_price'      => $containerEnabled ? $containerPrice : 0,
         'container_line_total' => $containerLineTotal
@@ -213,7 +215,6 @@ try {
 
     $pdo->beginTransaction();
 
-    /* ✅ REMOVED: container_total_amount, containers_balance */
     $insert = $pdo->prepare(
         "INSERT INTO orders
             (order_code, delivery_boy_id,
@@ -243,52 +244,7 @@ try {
         $upiString
     ]);
 
-    /* ---- Grab order ID ONCE ---- */
     $orderId = (int)$pdo->lastInsertId();
-
-    /* =========================================
-       AUTO-CREATE CONTAINER RECORDS
-       (This is now the ONLY place container data is stored)
-       ========================================= */
-    $containerTotal = 0;
-
-    if ($orderId > 0) {
-
-        $cInsert = $pdo->prepare(
-            "INSERT INTO order_containers
-                (order_id, order_code, customer_name, customer_mobile,
-                 product_id, product_code, product_name,
-                 variant_id, variant_name,
-                 container_price, qty_issued, qty_returned,
-                 amount_refunded, refund_pending, refund_mode,
-                 status, issued_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 'none', 'issued', NOW())"
-        );
-
-        foreach ($cleanProducts as $cp) {
-            if (
-                (int)$cp['container_enabled'] === 1 &&
-                (float)$cp['container_price'] > 0 &&
-                (float)$cp['container_line_total'] > 0
-            ) {
-                $cInsert->execute([
-                    $orderId,
-                    $orderCode,
-                    $customerName,
-                    $customerMobile,
-                    $cp['product_id'],
-                    $cp['code'],
-                    $cp['name'],
-                    $cp['variant_id'],
-                    $cp['variant_name'],
-                    (float)$cp['container_price'],
-                    (int)$cp['qty']
-                ]);
-
-                $containerTotal += (float)$cp['container_line_total'];
-            }
-        }
-    }
 
     $pdo->commit();
 
@@ -296,7 +252,8 @@ try {
         'order_id'        => $orderId,
         'order_code'      => $orderCode,
         'total'           => $total,
-        'container_total' => $containerTotal,
+        'subtotal'        => $subtotal,
+        'container_total' => $containerTotal,   // informational only
         'upi_string'      => $upiString,
         'upi_link'        => $upiLink,
         'payee_name'      => $siteName
