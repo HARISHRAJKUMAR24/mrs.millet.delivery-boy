@@ -28,7 +28,7 @@
             </li>
 
             <li>
-                <a href="<?= BASE_URL ?>my-delivery.php">
+                <a href="<?= BASE_URL ?>delivery-orders.php">
                     <i class="bi bi-bag-check"></i>
                     My Delivery
                 </a>

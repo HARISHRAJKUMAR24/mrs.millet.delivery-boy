@@ -217,15 +217,15 @@ try {
 
     $insert = $pdo->prepare(
         "INSERT INTO orders
-            (order_code, delivery_boy_id,
-             customer_name, customer_mobile,
-             apartment_id, apartment_code, apartment_name,
-             division, division_charge,
-             subtotal, total_amount,
-             products_json,
-             status, payment_status, payment_upi_string,
-             created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'unpaid', ?, NOW())"
+        (order_code, delivery_boy_id,
+         customer_name, customer_mobile,
+         apartment_id, apartment_code, apartment_name,
+         division, division_charge,
+         subtotal, total_amount,
+         products_json,
+         status, delivery_status, payment_status, payment_upi_string,
+         created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'disabled', 'unpaid', ?, NOW())"
     );
 
     $insert->execute([
@@ -258,7 +258,6 @@ try {
         'upi_link'        => $upiLink,
         'payee_name'      => $siteName
     ]);
-
 } catch (PDOException $e) {
 
     if ($pdo->inTransaction()) {
