@@ -30,24 +30,12 @@ if ($aptCode === '') {
     exit;
 }
 
-/* ---------------- VERIFY BOY IS ALLOCATED TO THIS APARTMENT ---------------- */
-try {
-    $check = $pdo->prepare(
-        "SELECT 1 FROM apartment_delivery_boys
-         WHERE apartment_code = ? AND delivery_boy_id = ?
-         LIMIT 1"
-    );
-    $check->execute([$aptCode, $boyId]);
-    if (!$check->fetch()) {
-        header('Location: delivery-orders.php');
-        exit;
-    }
-} catch (PDOException $e) {
-    header('Location: delivery-orders.php');
-    exit;
-}
+/* ============================================================
+   REMOVED: apartment allocation check
+   Any delivery boy can now open any apartment's orders page.
+   ============================================================ */
 
-/* ---------------- FETCH APARTMENT ---------------- */
+/* ---------------- APARTMENT ---------------- */
 $apartment = null;
 try {
     $stmt = $pdo->prepare(
@@ -56,7 +44,8 @@ try {
     );
     $stmt->execute([$aptCode]);
     $apartment = $stmt->fetch();
-} catch (PDOException $e) {}
+} catch (PDOException $e) {
+}
 
 if (!$apartment) {
     header('Location: delivery-orders.php');
@@ -64,41 +53,47 @@ if (!$apartment) {
 }
 
 /* ---------------- FILTERS ---------------- */
-$statusFilter = trim($_GET['status'] ?? 'pending');   // pending | delivered | all
-$dateFilter   = trim($_GET['date']   ?? '');          // yyyy-mm-dd, empty = all
+$statusFilter = trim($_GET['status'] ?? 'pending');
+$dateFilter   = trim($_GET['date']   ?? '');
 
 $allowedStatus = ['pending', 'delivered', 'all'];
 if (!in_array($statusFilter, $allowedStatus, true)) $statusFilter = 'pending';
 
-/* ---------------- FETCH ORDERS ---------------- */
+/* ---------------- ORDERS ---------------- */
 $orders = [];
 try {
-    $sql = "SELECT id, order_code, delivery_boy_id,
-                   customer_name, customer_mobile,
-                   apartment_name, apartment_code, division, division_charge,
-                   subtotal, total_amount,
-                   products_json,
-                   status, delivery_status, payment_status,
-                   payment_ref, paid_at, created_at
-            FROM orders
-            WHERE apartment_code = ?
-              AND delivery_boy_id = ?
-              AND status <> 'cancelled'";
+    $sql = "SELECT o.id, o.order_code, o.delivery_boy_id,
+                   o.customer_name, o.customer_mobile,
+                   o.apartment_name, o.apartment_code, o.division, o.division_charge,
+                   o.subtotal, o.total_amount,
+                   o.products_json,
+                   o.status, o.delivery_status, o.payment_status,
+                   o.payment_ref, o.paid_at, o.created_at, o.updated_at,
+                   oc.total_containers,
+                   oc.received_containers,
+                   (oc.total_containers - oc.received_containers) AS pending_containers,
+                   oc.container_amount,
+                   oc.status AS container_status
+            FROM orders o
+            LEFT JOIN order_containers oc ON oc.order_id = o.id
+            WHERE o.apartment_code = ?
+              AND o.delivery_boy_id = ?
+              AND o.status <> 'cancelled'";
 
     $params = [$aptCode, $boyId];
 
     if ($statusFilter === 'pending') {
-        $sql .= " AND delivery_status = 'disabled'";
+        $sql .= " AND o.delivery_status = 'disabled'";
     } elseif ($statusFilter === 'delivered') {
-        $sql .= " AND delivery_status = 'enabled'";
+        $sql .= " AND o.delivery_status = 'enabled'";
     }
 
     if ($dateFilter !== '') {
-        $sql .= " AND DATE(created_at) = ?";
+        $sql .= " AND DATE(o.created_at) = ?";
         $params[] = $dateFilter;
     }
 
-    $sql .= " ORDER BY id DESC";
+    $sql .= " ORDER BY o.id DESC";
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
@@ -107,26 +102,67 @@ try {
     $orders = [];
 }
 
+/* ---------------- CONTAINER SUMMARY ---------------- */
+$containerSummary = [];
+try {
+    $sumStmt = $pdo->prepare(
+        "SELECT o.customer_mobile,
+                MAX(o.customer_name) AS customer_name,
+                SUM(oc.total_containers)     AS total_containers,
+                SUM(oc.received_containers)  AS received_containers,
+                SUM(oc.total_containers - oc.received_containers) AS pending_containers,
+                SUM(oc.container_amount)     AS container_amount,
+                COUNT(DISTINCT oc.order_id)  AS order_count
+         FROM order_containers oc
+         INNER JOIN orders o ON o.id = oc.order_id
+         WHERE o.apartment_code = ?
+           AND o.delivery_boy_id = ?
+           AND o.status <> 'cancelled'
+         GROUP BY o.customer_mobile
+         HAVING SUM(oc.total_containers - oc.received_containers) > 0"
+    );
+    $sumStmt->execute([$aptCode, $boyId]);
+    $rows = $sumStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    foreach ($rows as $r) {
+        $containerSummary[$r['customer_mobile']] = [
+            'customer_name'      => $r['customer_name'],
+            'total_containers'   => (int)$r['total_containers'],
+            'received_containers' => (int)$r['received_containers'],
+            'pending_containers' => (int)$r['pending_containers'],
+            'container_amount'   => (float)$r['container_amount'],
+            'order_count'        => (int)$r['order_count'],
+        ];
+    }
+} catch (PDOException $e) {
+}
+
 /* Prepare JS payload */
 $ordersJson = array_map(function ($o) {
     return [
-        'id'               => (int)$o['id'],
-        'order_code'       => $o['order_code'],
-        'created_at'       => $o['created_at'],
-        'customer_name'    => $o['customer_name'],
-        'customer_mobile'  => $o['customer_mobile'],
-        'apartment_code'   => $o['apartment_code'],
-        'apartment_name'   => $o['apartment_name'],
-        'division'         => $o['division'],
-        'division_charge'  => (float)$o['division_charge'],
-        'subtotal'         => (float)$o['subtotal'],
-        'total_amount'     => (float)$o['total_amount'],
-        'status'           => $o['status'],
-        'delivery_status'  => $o['delivery_status'],
-        'payment_status'   => $o['payment_status'],
-        'payment_ref'      => $o['payment_ref'],
-        'paid_at'          => $o['paid_at'],
-        'products'         => json_decode($o['products_json'] ?? '[]', true) ?: [],
+        'id'                 => (int)$o['id'],
+        'order_code'         => $o['order_code'],
+        'created_at'         => $o['created_at'],
+        'updated_at'         => $o['updated_at'],
+        'customer_name'      => $o['customer_name'],
+        'customer_mobile'    => $o['customer_mobile'],
+        'apartment_code'     => $o['apartment_code'],
+        'apartment_name'     => $o['apartment_name'],
+        'division'           => $o['division'],
+        'division_charge'    => (float)$o['division_charge'],
+        'subtotal'           => (float)$o['subtotal'],
+        'total_amount'       => (float)$o['total_amount'],
+        'status'             => $o['status'],
+        'delivery_status'    => $o['delivery_status'],
+        'payment_status'     => $o['payment_status'],
+        'payment_ref'        => $o['payment_ref'],
+        'paid_at'            => $o['paid_at'],
+        'products'           => json_decode($o['products_json'] ?? '[]', true) ?: [],
+        'total_containers'   => (int)($o['total_containers'] ?? 0),
+        'received_containers' => (int)($o['received_containers'] ?? 0),
+        'pending_containers' => (int)($o['pending_containers'] ?? 0),
+        'container_amount'   => (float)($o['container_amount'] ?? 0),
+        'container_status'   => $o['container_status'] ?? null,
     ];
 }, $orders);
 ?>
@@ -137,10 +173,9 @@ $ordersJson = array_map(function ($o) {
     <?php include './includes/head.php'; ?>
 
     <style>
-        /* =====================================================
-           APARTMENT ORDERS PAGE
-           ===================================================== */
-        .ao-page { padding: 24px 26px 40px; }
+        .ao-page {
+            padding: 24px 26px 40px;
+        }
 
         .ao-back {
             display: inline-flex;
@@ -151,9 +186,11 @@ $ordersJson = array_map(function ($o) {
             font-weight: 700;
             text-decoration: none;
             margin-bottom: 14px;
-            transition: .15s ease;
         }
-        .ao-back:hover { color: #b51f2c; }
+
+        .ao-back:hover {
+            color: #b51f2c;
+        }
 
         .ao-head {
             display: flex;
@@ -163,11 +200,13 @@ $ordersJson = array_map(function ($o) {
             margin-bottom: 20px;
             flex-wrap: wrap;
         }
+
         .ao-head-left {
             display: flex;
             align-items: center;
             gap: 14px;
         }
+
         .ao-head-icon {
             width: 52px;
             height: 52px;
@@ -181,6 +220,7 @@ $ordersJson = array_map(function ($o) {
             flex-shrink: 0;
             box-shadow: 0 8px 20px rgba(181, 31, 44, .25);
         }
+
         .ao-head h1 {
             font-family: "Playfair Display", serif;
             font-size: 24px;
@@ -188,13 +228,13 @@ $ordersJson = array_map(function ($o) {
             color: #302923;
             margin: 0 0 3px;
         }
+
         .ao-head p {
             margin: 0;
             font-size: 12px;
             color: #817a71;
         }
 
-        /* Filters row */
         .ao-filters {
             display: flex;
             gap: 10px;
@@ -212,6 +252,7 @@ $ordersJson = array_map(function ($o) {
             flex-direction: column;
             gap: 5px;
         }
+
         .ao-filter-lbl {
             font-size: 10px;
             font-weight: 800;
@@ -228,6 +269,7 @@ $ordersJson = array_map(function ($o) {
             padding: 3px;
             gap: 3px;
         }
+
         .ao-tab {
             border: none;
             background: transparent;
@@ -241,7 +283,11 @@ $ordersJson = array_map(function ($o) {
             transition: .15s ease;
             white-space: nowrap;
         }
-        .ao-tab:hover { color: #b51f2c; }
+
+        .ao-tab:hover {
+            color: #b51f2c;
+        }
+
         .ao-tab.active {
             background: #fff;
             color: #b51f2c;
@@ -260,6 +306,7 @@ $ordersJson = array_map(function ($o) {
             outline: none;
             cursor: pointer;
         }
+
         .ao-date:focus {
             border-color: #b51f2c;
             box-shadow: 0 0 0 3px rgba(181, 31, 44, .06);
@@ -281,24 +328,27 @@ $ordersJson = array_map(function ($o) {
             align-items: center;
             gap: 5px;
             margin-top: 17px;
+            text-decoration: none;
         }
+
         .ao-clear-btn:hover {
             background: #faf7f0;
             color: #302923;
         }
 
-        /* Table */
         .ao-table-wrap {
             background: #fff;
             border: 1.5px solid #ece5da;
             border-radius: 18px;
             overflow: hidden;
         }
+
         .ao-table {
             width: 100%;
             border-collapse: collapse;
             font-size: 13px;
         }
+
         .ao-table thead th {
             text-align: left;
             font-size: 10.5px;
@@ -311,14 +361,21 @@ $ordersJson = array_map(function ($o) {
             border-bottom: 1.5px solid #ece5da;
             white-space: nowrap;
         }
+
         .ao-table tbody td {
             padding: 14px 16px;
             border-bottom: 1px solid #f5efe5;
             color: #302923;
             vertical-align: middle;
         }
-        .ao-table tbody tr:last-child td { border-bottom: 0; }
-        .ao-table tbody tr:hover { background: #fffaf5; }
+
+        .ao-table tbody tr:last-child td {
+            border-bottom: 0;
+        }
+
+        .ao-table tbody tr:hover {
+            background: #fffaf5;
+        }
 
         .ao-code {
             font-weight: 800;
@@ -327,6 +384,7 @@ $ordersJson = array_map(function ($o) {
             letter-spacing: .3px;
             display: block;
         }
+
         .ao-date-cell {
             display: block;
             font-size: 10.5px;
@@ -335,7 +393,11 @@ $ordersJson = array_map(function ($o) {
             font-weight: 600;
         }
 
-        .ao-name { font-weight: 700; display: block; }
+        .ao-name {
+            font-weight: 700;
+            display: block;
+        }
+
         .ao-phone {
             display: inline-flex;
             align-items: center;
@@ -350,7 +412,11 @@ $ordersJson = array_map(function ($o) {
             background: #fff5f5;
             transition: .15s ease;
         }
-        .ao-phone:hover { background: #b51f2c; color: #fff; }
+
+        .ao-phone:hover {
+            background: #b51f2c;
+            color: #fff;
+        }
 
         .ao-pill {
             display: inline-flex;
@@ -364,10 +430,28 @@ $ordersJson = array_map(function ($o) {
             text-transform: uppercase;
             white-space: nowrap;
         }
+
         .ao-pill.is-paid,
-        .ao-pill.is-enabled { background: #e7f6ec; color: #1f7a3d; }
+        .ao-pill.is-enabled {
+            background: #e7f6ec;
+            color: #1f7a3d;
+        }
+
         .ao-pill.is-unpaid,
-        .ao-pill.is-disabled { background: #fbeaea; color: #b51f2c; }
+        .ao-pill.is-disabled {
+            background: #fbeaea;
+            color: #b51f2c;
+        }
+
+        .ao-pill.is-container-done {
+            background: #e7f6ec;
+            color: #1f7a3d;
+        }
+
+        .ao-pill.is-container-pending {
+            background: #fdf7ec;
+            color: #b8893c;
+        }
 
         .ao-icon-btn {
             width: 34px;
@@ -383,6 +467,7 @@ $ordersJson = array_map(function ($o) {
             transition: .18s ease;
             font-size: 14px;
         }
+
         .ao-icon-btn:hover {
             border-color: #b51f2c;
             color: #b51f2c;
@@ -391,7 +476,7 @@ $ordersJson = array_map(function ($o) {
 
         .ao-toggle {
             height: 34px;
-            padding: 0 14px;
+            padding: 0 12px;
             border-radius: 10px;
             border: 1.5px solid #b51f2c;
             background: #fff;
@@ -406,26 +491,82 @@ $ordersJson = array_map(function ($o) {
             gap: 5px;
             white-space: nowrap;
         }
+
         .ao-toggle:hover:not(:disabled) {
             background: #b51f2c;
             color: #fff;
         }
+
         .ao-toggle.is-on {
             background: #1f7a3d;
             border-color: #1f7a3d;
             color: #fff;
         }
+
         .ao-toggle.is-on:hover:not(:disabled) {
             background: #155c2c;
             border-color: #155c2c;
         }
-        .ao-toggle:disabled { opacity: .55; cursor: not-allowed; }
+
+        .ao-toggle:disabled {
+            opacity: .55;
+            cursor: not-allowed;
+        }
+
+        .ao-toggle.is-locked {
+            background: #f4efe8;
+            border-color: #d5cbbd;
+            color: #948c82;
+            cursor: not-allowed;
+        }
+
+        .ao-mini-btn {
+            height: 34px;
+            padding: 0 12px;
+            border-radius: 10px;
+            border: 1.5px solid #ece5da;
+            background: #fff;
+            color: #6f675f;
+            font-family: "DM Sans", sans-serif;
+            font-size: 11px;
+            font-weight: 800;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            transition: .18s ease;
+            white-space: nowrap;
+        }
+
+        .ao-mini-btn:hover:not(:disabled) {
+            background: #fdf7ec;
+            border-color: #e8d5a8;
+            color: #b8893c;
+        }
+
+        .ao-mini-btn.pay:hover:not(:disabled) {
+            background: #e7f6ec;
+            border-color: #a7c8a9;
+            color: #1f7a3d;
+        }
+
+        .ao-mini-btn.done {
+            background: #e7f6ec;
+            border-color: #a7c8a9;
+            color: #1f7a3d;
+        }
+
+        .ao-mini-btn:disabled {
+            opacity: .55;
+            cursor: not-allowed;
+        }
 
         .ao-actions {
             display: flex;
             align-items: center;
             gap: 6px;
             justify-content: flex-end;
+            flex-wrap: wrap;
         }
 
         .ao-empty {
@@ -433,6 +574,7 @@ $ordersJson = array_map(function ($o) {
             padding: 60px 20px;
             color: #948c82;
         }
+
         .ao-empty i {
             font-size: 40px;
             color: #ece5da;
@@ -440,7 +582,7 @@ $ordersJson = array_map(function ($o) {
             margin-bottom: 10px;
         }
 
-        /* Modal (re-used) */
+        /* Modal */
         .ao-modal-overlay {
             position: fixed;
             inset: 0;
@@ -455,7 +597,11 @@ $ordersJson = array_map(function ($o) {
             visibility: hidden;
             transition: .22s ease;
         }
-        .ao-modal-overlay.show { opacity: 1; visibility: visible; }
+
+        .ao-modal-overlay.show {
+            opacity: 1;
+            visibility: visible;
+        }
 
         .ao-modal {
             background: #fff;
@@ -468,7 +614,10 @@ $ordersJson = array_map(function ($o) {
             transform: translateY(15px) scale(.97);
             transition: transform .25s cubic-bezier(.2, .9, .3, 1.2);
         }
-        .ao-modal-overlay.show .ao-modal { transform: translateY(0) scale(1); }
+
+        .ao-modal-overlay.show .ao-modal {
+            transform: translateY(0) scale(1);
+        }
 
         .ao-modal-head {
             padding: 22px 22px 14px;
@@ -482,6 +631,7 @@ $ordersJson = array_map(function ($o) {
             background: #fff;
             z-index: 2;
         }
+
         .ao-modal-head h3 {
             margin: 0;
             font-family: "Playfair Display", serif;
@@ -489,12 +639,14 @@ $ordersJson = array_map(function ($o) {
             font-weight: 700;
             color: #302923;
         }
+
         .ao-modal-head p {
             margin: 2px 0 0;
             font-size: 11.5px;
             color: #948c82;
             font-weight: 600;
         }
+
         .ao-modal-close {
             width: 34px;
             height: 34px;
@@ -510,12 +662,23 @@ $ordersJson = array_map(function ($o) {
             flex-shrink: 0;
             font-size: 14px;
         }
-        .ao-modal-close:hover { background: #fbeaea; color: #b51f2c; }
 
-        .ao-modal-body { padding: 20px 22px 22px; }
+        .ao-modal-close:hover {
+            background: #fbeaea;
+            color: #b51f2c;
+        }
 
-        .ao-modal-section { margin-bottom: 22px; }
-        .ao-modal-section:last-child { margin-bottom: 0; }
+        .ao-modal-body {
+            padding: 20px 22px 22px;
+        }
+
+        .ao-modal-section {
+            margin-bottom: 22px;
+        }
+
+        .ao-modal-section:last-child {
+            margin-bottom: 0;
+        }
 
         .ao-modal-title {
             display: flex;
@@ -528,7 +691,10 @@ $ordersJson = array_map(function ($o) {
             color: #948c82;
             margin: 0 0 12px;
         }
-        .ao-modal-title i { color: #b51f2c; }
+
+        .ao-modal-title i {
+            color: #b51f2c;
+        }
 
         .ao-info-list {
             display: flex;
@@ -539,6 +705,7 @@ $ordersJson = array_map(function ($o) {
             border-radius: 12px;
             padding: 14px 16px;
         }
+
         .ao-info-row {
             display: flex;
             align-items: center;
@@ -546,13 +713,19 @@ $ordersJson = array_map(function ($o) {
             gap: 12px;
             font-size: 12.5px;
         }
-        .ao-info-row .lbl { color: #948c82; font-weight: 600; }
+
+        .ao-info-row .lbl {
+            color: #948c82;
+            font-weight: 600;
+        }
+
         .ao-info-row .val {
             color: #302923;
             font-weight: 700;
             text-align: right;
             word-break: break-word;
         }
+
         .ao-call {
             display: inline-flex;
             align-items: center;
@@ -564,7 +737,11 @@ $ordersJson = array_map(function ($o) {
             border-radius: 8px;
             text-decoration: none;
         }
-        .ao-call:hover { background: #b51f2c; color: #fff; }
+
+        .ao-call:hover {
+            background: #b51f2c;
+            color: #fff;
+        }
 
         .ao-products {
             display: flex;
@@ -574,6 +751,7 @@ $ordersJson = array_map(function ($o) {
             border-radius: 12px;
             padding: 8px;
         }
+
         .ao-prod {
             display: flex;
             align-items: center;
@@ -582,6 +760,7 @@ $ordersJson = array_map(function ($o) {
             background: #fdfaf4;
             border-radius: 10px;
         }
+
         .ao-prod-thumb {
             width: 44px;
             height: 44px;
@@ -594,8 +773,18 @@ $ordersJson = array_map(function ($o) {
             justify-content: center;
             font-size: 18px;
         }
-        .ao-prod-thumb img { width: 100%; height: 100%; object-fit: cover; }
-        .ao-prod-info { flex: 1; min-width: 0; }
+
+        .ao-prod-thumb img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .ao-prod-info {
+            flex: 1;
+            min-width: 0;
+        }
+
         .ao-prod-name {
             font-size: 12.5px;
             font-weight: 700;
@@ -603,12 +792,14 @@ $ordersJson = array_map(function ($o) {
             margin: 0;
             line-height: 1.3;
         }
+
         .ao-prod-meta {
             font-size: 11px;
             color: #948c82;
             margin: 2px 0 0;
             font-weight: 600;
         }
+
         .ao-prod-price {
             font-size: 12.5px;
             font-weight: 800;
@@ -622,6 +813,7 @@ $ordersJson = array_map(function ($o) {
             border-radius: 12px;
             padding: 14px 16px;
         }
+
         .ao-trow {
             display: flex;
             justify-content: space-between;
@@ -630,16 +822,172 @@ $ordersJson = array_map(function ($o) {
             font-weight: 600;
             padding: 4px 0;
         }
-        .ao-trow strong { color: #302923; font-weight: 800; }
+
+        .ao-trow strong {
+            color: #302923;
+            font-weight: 800;
+        }
+
         .ao-trow.grand {
             font-size: 15px;
             margin-top: 8px;
             padding-top: 10px;
             border-top: 1.5px dashed #e4ddd3;
         }
-        .ao-trow.grand strong { color: #b51f2c; font-size: 17px; }
 
-        /* Toast */
+        .ao-trow.grand strong {
+            color: #b51f2c;
+            font-size: 17px;
+        }
+
+        .ao-field {
+            margin-bottom: 14px;
+        }
+
+        .ao-field label {
+            display: block;
+            font-size: 10.5px;
+            font-weight: 800;
+            color: #4e4841;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: .05em;
+        }
+
+        .ao-field input,
+        .ao-field textarea {
+            width: 100%;
+            height: 46px;
+            border: 1.5px solid #ece5da;
+            background: #fffdf9;
+            border-radius: 11px;
+            padding: 0 14px;
+            font-family: "DM Sans", sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            color: #292521;
+            outline: none;
+            transition: .15s ease;
+        }
+
+        .ao-field textarea {
+            height: auto;
+            min-height: 70px;
+            padding: 12px 14px;
+            resize: vertical;
+        }
+
+        .ao-field input:focus,
+        .ao-field textarea:focus {
+            border-color: #b51f2c;
+            background: #fff;
+            box-shadow: 0 0 0 4px rgba(181, 31, 44, .08);
+        }
+
+        .ao-field .hint {
+            font-size: 11px;
+            color: #948c82;
+            margin-top: 6px;
+            font-weight: 600;
+        }
+
+        .ao-field .hint.green {
+            color: #1b5e20;
+        }
+
+        .ao-field .hint.red {
+            color: #b51f2c;
+        }
+
+        .ao-quick-btns {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+
+        .ao-quick-btn {
+            height: 30px;
+            padding: 0 12px;
+            border-radius: 8px;
+            border: 1.5px solid #ece5da;
+            background: #fff;
+            font-family: "DM Sans", sans-serif;
+            font-size: 11px;
+            font-weight: 800;
+            color: #6f675f;
+            cursor: pointer;
+            transition: .15s ease;
+        }
+
+        .ao-quick-btn:hover {
+            background: #fbe8e9;
+            border-color: #f1c8cc;
+            color: #b51f2c;
+        }
+
+        .ao-modal-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .ao-modal-btn {
+            flex: 1;
+            height: 46px;
+            border-radius: 11px;
+            border: none;
+            font-family: "DM Sans", sans-serif;
+            font-size: 12.5px;
+            font-weight: 800;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 7px;
+            transition: .18s ease;
+        }
+
+        .ao-modal-btn.primary {
+            background: linear-gradient(135deg, #b51f2c 0%, #8e1722 100%);
+            color: #fff;
+            box-shadow: 0 8px 20px rgba(181, 31, 44, .22);
+        }
+
+        .ao-modal-btn.primary:hover:not(:disabled) {
+            transform: translateY(-1px);
+        }
+
+        .ao-modal-btn.primary:disabled {
+            opacity: .55;
+            cursor: not-allowed;
+        }
+
+        .ao-modal-btn.green {
+            background: linear-gradient(135deg, #1f7a3d 0%, #14532d 100%);
+            color: #fff;
+            box-shadow: 0 8px 20px rgba(31, 122, 61, .25);
+        }
+
+        .ao-modal-btn.green:hover:not(:disabled) {
+            transform: translateY(-1px);
+        }
+
+        .ao-modal-btn.green:disabled {
+            opacity: .55;
+            cursor: not-allowed;
+        }
+
+        .ao-modal-btn.ghost {
+            background: #fff;
+            border: 1.5px solid #e4ddd3;
+            color: #6f675f;
+        }
+
+        .ao-modal-btn.ghost:hover {
+            background: #faf7f0;
+        }
+
         .ao-toast {
             position: fixed;
             top: 84px;
@@ -657,9 +1005,17 @@ $ordersJson = array_map(function ($o) {
             pointer-events: none;
             transition: opacity .25s ease, transform .25s ease;
             white-space: nowrap;
+            max-width: 90vw;
         }
-        .ao-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-        .ao-toast.error { background: #b51f2c; }
+
+        .ao-toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        .ao-toast.error {
+            background: #b51f2c;
+        }
 
         .btn-spinner {
             width: 12px;
@@ -670,11 +1026,21 @@ $ordersJson = array_map(function ($o) {
             animation: aoSpin .7s linear infinite;
             display: inline-block;
         }
-        @keyframes aoSpin { to { transform: rotate(360deg); } }
+
+        @keyframes aoSpin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
 
         @media (max-width: 900px) {
-            .ao-table-wrap { overflow-x: auto; }
-            .ao-table { min-width: 720px; }
+            .ao-table-wrap {
+                overflow-x: auto;
+            }
+
+            .ao-table {
+                min-width: 900px;
+            }
         }
     </style>
 </head>
@@ -732,8 +1098,6 @@ $ordersJson = array_map(function ($o) {
                 </div>
             </div>
 
-
-            <!-- Filters -->
             <form class="ao-filters" method="GET" id="filterForm">
                 <input type="hidden" name="code" value="<?= htmlspecialchars($aptCode) ?>">
 
@@ -750,7 +1114,7 @@ $ordersJson = array_map(function ($o) {
                 <div class="ao-filter-group">
                     <span class="ao-filter-lbl">Date</span>
                     <input type="date" name="date" class="ao-date" id="dateInput"
-                           value="<?= htmlspecialchars($dateFilter) ?>">
+                        value="<?= htmlspecialchars($dateFilter) ?>">
                 </div>
 
                 <button type="submit" class="ao-clear-btn" id="applyBtn">
@@ -763,7 +1127,6 @@ $ordersJson = array_map(function ($o) {
             </form>
 
 
-            <!-- Orders table -->
             <?php if (empty($orders)): ?>
                 <div class="ao-table-wrap">
                     <div class="ao-empty">
@@ -786,17 +1149,39 @@ $ordersJson = array_map(function ($o) {
                                 <th>Customer</th>
                                 <th>Division</th>
                                 <th>Total</th>
+                                <th>Payment</th>
+                                <th>Container</th>
                                 <th style="text-align:right;">Action</th>
                             </tr>
                         </thead>
                         <tbody id="aoBody">
                             <?php foreach ($orders as $o):
-                                $isEnabled = ($o['delivery_status'] === 'enabled');
-                                $mobile    = preg_replace('/[^0-9+]/', '', (string)$o['customer_mobile']);
+                                $isEnabled    = ($o['delivery_status'] === 'enabled');
+                                $isPaid       = ($o['payment_status'] === 'paid');
+                                $mobile       = preg_replace('/[^0-9+]/', '', (string)$o['customer_mobile']);
+
+                                $totalCont    = (int)($o['total_containers'] ?? 0);
+                                $recvCont     = (int)($o['received_containers'] ?? 0);
+                                $hasContainer = $totalCont > 0;
+
+                                $cust = $containerSummary[$o['customer_mobile']] ?? null;
+                                $custPending  = $cust ? $cust['pending_containers'] : 0;
+                                $custTotal    = $cust ? $cust['total_containers'] : $totalCont;
+                                $custReceived = $cust ? $cust['received_containers'] : $recvCont;
+
+                                $isLocked = false;
+                                if ($isEnabled && !empty($o['updated_at'])) {
+                                    $updatedTs = strtotime($o['updated_at']);
+                                    if ($updatedTs && (time() - $updatedTs) > 5 * 3600) {
+                                        $isLocked = true;
+                                    }
+                                }
                             ?>
                                 <tr
                                     data-id="<?= (int)$o['id'] ?>"
-                                    data-delivery="<?= $isEnabled ? 'enabled' : 'disabled' ?>">
+                                    data-mobile="<?= htmlspecialchars($o['customer_mobile']) ?>"
+                                    data-delivery="<?= $isEnabled ? 'enabled' : 'disabled' ?>"
+                                    data-locked="<?= $isLocked ? '1' : '0' ?>">
                                     <td>
                                         <span class="ao-code">#<?= htmlspecialchars($o['order_code']) ?></span>
                                         <span class="ao-date-cell"><?= date('d M Y, h:i A', strtotime($o['created_at'])) ?></span>
@@ -812,21 +1197,80 @@ $ordersJson = array_map(function ($o) {
                                     <td>Division <?= htmlspecialchars($o['division'] ?? '—') ?></td>
                                     <td><strong>₹<?= number_format((float)$o['total_amount'], 2) ?></strong></td>
                                     <td>
+                                        <span class="ao-pill <?= $isPaid ? 'is-paid' : 'is-unpaid' ?>">
+                                            <i class="bi <?= $isPaid ? 'bi-check-circle-fill' : 'bi-x-circle-fill' ?>"></i>
+                                            <?= $isPaid ? 'Paid' : 'Unpaid' ?>
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <?php if (!$hasContainer): ?>
+                                            <span class="ao-pill is-disabled" style="background:#f1ece4;color:#948c82;">
+                                                <i class="bi bi-dash-circle"></i> None
+                                            </span>
+                                        <?php else: ?>
+                                            <span class="ao-pill <?= ($custPending > 0) ? 'is-container-pending' : 'is-container-done' ?>">
+                                                <?php if ($custPending > 0): ?>
+                                                    <i class="bi bi-hourglass-split"></i>
+                                                    <?= $custReceived ?>/<?= $custTotal ?> · <?= $custPending ?> pending
+                                                <?php else: ?>
+                                                    <i class="bi bi-check-circle-fill"></i>
+                                                    <?= $custReceived ?>/<?= $custTotal ?> returned
+                                                <?php endif; ?>
+                                            </span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
                                         <div class="ao-actions">
                                             <button type="button" class="ao-icon-btn js-view" data-id="<?= (int)$o['id'] ?>" title="View details">
                                                 <i class="bi bi-eye"></i>
                                             </button>
 
-                                            <button type="button"
+                                            <?php if ($isLocked): ?>
+                                                <button type="button"
+                                                    class="ao-toggle is-on is-locked"
+                                                    disabled
+                                                    title="Delivery locked (5 hours passed)">
+                                                    <i class="bi bi-lock-fill"></i> Locked
+                                                </button>
+                                            <?php else: ?>
+                                                <button type="button"
                                                     class="ao-toggle js-toggle <?= $isEnabled ? 'is-on' : '' ?>"
                                                     data-id="<?= (int)$o['id'] ?>"
-                                                    data-enabled="<?= $isEnabled ? '1' : '0' ?>">
-                                                <?php if ($isEnabled): ?>
-                                                    <i class="bi bi-arrow-counterclockwise"></i> Undo
-                                                <?php else: ?>
-                                                    <i class="bi bi-truck"></i> Delivered
-                                                <?php endif; ?>
-                                            </button>
+                                                    data-enabled="<?= $isEnabled ? '1' : '0' ?>"
+                                                    title="Mark delivered">
+                                                    <?php if ($isEnabled): ?>
+                                                        <i class="bi bi-arrow-counterclockwise"></i> Undo
+                                                    <?php else: ?>
+                                                        <i class="bi bi-truck"></i> Delivered
+                                                    <?php endif; ?>
+                                                </button>
+                                            <?php endif; ?>
+
+                                            <?php if ($isPaid): ?>
+                                                <button type="button"
+                                                    class="ao-mini-btn done"
+                                                    disabled
+                                                    title="Already paid">
+                                                    <i class="bi bi-check-circle-fill"></i> Paid
+                                                </button>
+                                            <?php else: ?>
+                                                <button type="button"
+                                                    class="ao-mini-btn pay js-pay"
+                                                    data-id="<?= (int)$o['id'] ?>"
+                                                    title="Mark as paid">
+                                                    <i class="bi bi-cash-coin"></i> Pay
+                                                </button>
+                                            <?php endif; ?>
+
+                                            <?php if ($hasContainer && $custPending > 0): ?>
+                                                <button type="button"
+                                                    class="ao-mini-btn js-container"
+                                                    data-id="<?= (int)$o['id'] ?>"
+                                                    data-mobile="<?= htmlspecialchars($o['customer_mobile']) ?>"
+                                                    title="Container return">
+                                                    <i class="bi bi-box2-heart"></i> Return
+                                                </button>
+                                            <?php endif; ?>
                                         </div>
                                     </td>
                                 </tr>
@@ -857,18 +1301,76 @@ $ordersJson = array_map(function ($o) {
     </div>
 
 
+    <!-- ================= CONTAINER RETURN MODAL ================= -->
+    <div class="ao-modal-overlay" id="aoContainerModal" aria-hidden="true">
+        <div class="ao-modal" role="dialog" aria-modal="true" style="max-width:520px;">
+            <div class="ao-modal-head">
+                <div>
+                    <h3>Container Return</h3>
+                    <p id="containerModalSub">Refund will be credited to customer wallet.</p>
+                </div>
+                <button type="button" class="ao-modal-close" id="containerModalClose">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+            <div class="ao-modal-body">
+
+                <div class="ao-info-list" style="margin-bottom:14px;" id="containerModalInfo"></div>
+
+                <div id="containerBreakdown" style="margin-bottom:16px;"></div>
+
+                <form id="containerForm" autocomplete="off">
+                    <input type="hidden" id="containerOrderId" value="">
+                    <input type="hidden" id="containerMobile" value="">
+
+                    <div class="ao-field">
+                        <label>Returned Containers <span style="color:#b51f2c;">*</span></label>
+                        <input type="number" id="containerCount" min="1" step="1" required placeholder="0">
+                        <div class="ao-quick-btns" id="containerQuickBtns">
+                            <button type="button" class="ao-quick-btn" data-qty="1">1</button>
+                            <button type="button" class="ao-quick-btn" data-qty="2">2</button>
+                            <button type="button" class="ao-quick-btn" data-qty="5">5</button>
+                            <button type="button" class="ao-quick-btn" id="containerFullBtn">Full</button>
+                        </div>
+                        <div class="hint" id="containerQtyHint">—</div>
+                    </div>
+
+                    <div class="ao-field">
+                        <label>Note (optional)</label>
+                        <textarea id="containerNote" maxlength="250" placeholder="e.g. returned in good condition"></textarea>
+                    </div>
+
+                    <div class="ao-info-list" style="background:#e8f6ea;border-color:#a7c8a9;">
+                        <div class="ao-info-row">
+                            <span class="lbl" style="color:#1b5e20;">Refund to wallet</span>
+                            <span class="val" id="containerRefund" style="color:#1b5e20;">₹0</span>
+                        </div>
+                    </div>
+
+                    <div class="ao-modal-actions">
+                        <button type="button" class="ao-modal-btn ghost" id="containerCancel">Cancel</button>
+                        <button type="submit" class="ao-modal-btn green" id="containerSubmit">
+                            <i class="bi bi-check-lg"></i>
+                            <span id="containerSubmitText">Mark Returned</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+
     <div class="ao-toast" id="aoToast"></div>
 
 
-    <!-- ================= GLOBALS ================= -->
     <script>
-        window.BASE_URL  = "<?= BASE_URL ?>";
+        window.BASE_URL = "<?= BASE_URL ?>";
         window.ADMIN_URL = "<?= ADMIN_URL ?>";
-        window.ORDERS    = <?= json_encode($ordersJson, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>;
+        window.ORDERS = <?= json_encode($ordersJson, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>;
         window.CURRENT_STATUS = "<?= htmlspecialchars($statusFilter) ?>";
+        window.CONTAINER_SUMMARY = <?= json_encode($containerSummary, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>;
     </script>
 
-    <!-- SIDEBAR TOGGLE -->
     <script>
         (function() {
             const sidebar = document.getElementById("sidebar");
@@ -881,6 +1383,7 @@ $ordersJson = array_map(function ($o) {
                 overlay.classList.add("show");
                 document.body.style.overflow = "hidden";
             }
+
             function closeSidebar() {
                 sidebar.classList.remove("open");
                 overlay.classList.remove("show");
@@ -892,7 +1395,6 @@ $ordersJson = array_map(function ($o) {
         })();
     </script>
 
-    <!-- PAGE SCRIPT -->
     <script src="<?= BASE_URL ?>js/apartment-orders.js"></script>
 
 </body>

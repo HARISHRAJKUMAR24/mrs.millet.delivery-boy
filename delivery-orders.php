@@ -29,7 +29,11 @@ $logoUrl  = !empty($settings['logo_image']) ? ADMIN_URL . $settings['logo_image'
 
 $firstName = explode(' ', trim($boy['full_name']))[0];
 
-/* ---------------- FETCH APARTMENTS ALLOCATED TO THIS BOY ---------------- */
+/* =========================================================
+   FETCH APARTMENTS THAT HAVE ORDERS FOR THIS DELIVERY BOY
+   Only apartments where this boy has at least one order
+   (pending OR delivered) are shown — no empty apartments.
+   ========================================================= */
 $apartments = [];
 try {
     $stmt = $pdo->prepare(
@@ -46,9 +50,14 @@ try {
                    AND o.delivery_boy_id = ?
                    AND o.delivery_status = 'enabled') AS delivered_count
          FROM apartments a
-         INNER JOIN apartment_delivery_boys adb ON adb.apartment_code = a.apartment_code
-         WHERE adb.delivery_boy_id = ?
-           AND a.status = 1
+         WHERE a.status = 1
+           AND EXISTS (
+                SELECT 1
+                FROM orders o
+                WHERE o.apartment_code = a.apartment_code
+                  AND o.delivery_boy_id = ?
+                  AND o.status <> 'cancelled'
+           )
          ORDER BY a.apartment_name ASC"
     );
     $stmt->execute([$boyId, $boyId, $boyId]);
@@ -67,7 +76,9 @@ try {
         /* =====================================================
            APARTMENT CARDS — DELIVERY BOY PANEL
            ===================================================== */
-        .do-page { padding: 24px 26px 40px; }
+        .do-page {
+            padding: 24px 26px 40px;
+        }
 
         .do-head {
             display: flex;
@@ -77,6 +88,7 @@ try {
             margin-bottom: 20px;
             flex-wrap: wrap;
         }
+
         .do-head h1 {
             font-family: "Playfair Display", serif;
             font-size: 26px;
@@ -84,6 +96,7 @@ try {
             color: #302923;
             margin: 0 0 4px;
         }
+
         .do-head p {
             margin: 0;
             font-size: 12.5px;
@@ -94,6 +107,7 @@ try {
             position: relative;
             min-width: 260px;
         }
+
         .do-search input {
             width: 100%;
             height: 42px;
@@ -107,12 +121,14 @@ try {
             outline: none;
             transition: .2s ease;
         }
+
         .do-search input:focus {
             border-color: #b51f2c;
             background: #fff;
             box-shadow: 0 0 0 4px rgba(181, 31, 44, .08);
         }
-        .do-search > i {
+
+        .do-search>i {
             position: absolute;
             left: 14px;
             top: 50%;
@@ -142,21 +158,28 @@ try {
             position: relative;
             overflow: hidden;
         }
+
         .apt-card::before {
             content: "";
             position: absolute;
-            top: 0; left: 0; right: 0;
+            top: 0;
+            left: 0;
+            right: 0;
             height: 4px;
             background: linear-gradient(90deg, #b51f2c 0%, #8e1722 100%);
             opacity: 0;
             transition: opacity .2s ease;
         }
+
         .apt-card:hover {
             transform: translateY(-3px);
             box-shadow: 0 14px 30px -10px rgba(48, 41, 35, .15);
             border-color: #d98a91;
         }
-        .apt-card:hover::before { opacity: 1; }
+
+        .apt-card:hover::before {
+            opacity: 1;
+        }
 
         .apt-card-head {
             display: flex;
@@ -178,7 +201,11 @@ try {
             box-shadow: 0 8px 20px rgba(181, 31, 44, .25);
         }
 
-        .apt-card-info { flex: 1; min-width: 0; }
+        .apt-card-info {
+            flex: 1;
+            min-width: 0;
+        }
+
         .apt-card-name {
             font-size: 14px;
             font-weight: 800;
@@ -189,6 +216,7 @@ try {
             overflow: hidden;
             text-overflow: ellipsis;
         }
+
         .apt-card-code {
             font-size: 10.5px;
             color: #948c82;
@@ -196,6 +224,7 @@ try {
             font-weight: 700;
             letter-spacing: .3px;
         }
+
         .apt-card-addr {
             font-size: 11px;
             color: #948c82;
@@ -229,19 +258,25 @@ try {
             text-transform: uppercase;
             white-space: nowrap;
         }
+
         .apt-count.pending {
             background: #fdf7ec;
             color: #b8893c;
         }
+
         .apt-count.delivered {
             background: #e7f6ec;
             color: #1f7a3d;
         }
+
         .apt-count.zero {
             background: #f1ece4;
             color: #948c82;
         }
-        .apt-count i { font-size: 11px; }
+
+        .apt-count i {
+            font-size: 11px;
+        }
 
         .apt-card-go {
             width: 32px;
@@ -255,6 +290,7 @@ try {
             font-size: 12px;
             transition: .2s ease;
         }
+
         .apt-card:hover .apt-card-go {
             background: #b51f2c;
             color: #fff;
@@ -270,23 +306,34 @@ try {
             border: 1.5px dashed #ece5da;
             border-radius: 18px;
         }
+
         .do-empty i {
             font-size: 44px;
             color: #ece5da;
             display: block;
             margin-bottom: 10px;
         }
+
         .do-empty h3 {
             font-family: "Playfair Display", serif;
             font-size: 18px;
             color: #302923;
             margin: 0 0 6px;
         }
-        .do-empty p { font-size: 12.5px; margin: 0; }
+
+        .do-empty p {
+            font-size: 12.5px;
+            margin: 0;
+        }
 
         @media (max-width: 640px) {
-            .do-page { padding: 18px 14px 40px; }
-            .do-search { min-width: 100%; }
+            .do-page {
+                padding: 18px 14px 40px;
+            }
+
+            .do-search {
+                min-width: 100%;
+            }
         }
     </style>
 </head>
@@ -326,7 +373,7 @@ try {
             <div class="do-head">
                 <div>
                     <h1>My Apartments</h1>
-                    <p>Only apartments allocated to you are shown here.</p>
+                    <p>Only apartments with your orders are shown here.</p>
                 </div>
 
                 <div class="do-search">
@@ -338,8 +385,8 @@ try {
             <?php if (empty($apartments)): ?>
                 <div class="do-empty">
                     <i class="bi bi-building"></i>
-                    <h3>No apartments allocated</h3>
-                    <p>The admin hasn't allocated any apartments to you yet.</p>
+                    <h3>No orders yet</h3>
+                    <p>You don't have any orders right now. Once orders are assigned to you, they'll appear here.</p>
                 </div>
             <?php else: ?>
                 <div class="apt-grid" id="aptGrid">
@@ -348,9 +395,9 @@ try {
                         $delivered = (int)$a['delivered_count'];
                     ?>
                         <div class="apt-card"
-                             data-code="<?= htmlspecialchars($a['apartment_code']) ?>"
-                             data-name="<?= htmlspecialchars($a['apartment_name']) ?>"
-                             data-search="<?= htmlspecialchars(strtolower($a['apartment_name'] . ' ' . $a['apartment_code'] . ' ' . $a['apartment_address'])) ?>">
+                            data-code="<?= htmlspecialchars($a['apartment_code']) ?>"
+                            data-name="<?= htmlspecialchars($a['apartment_name']) ?>"
+                            data-search="<?= htmlspecialchars(strtolower($a['apartment_name'] . ' ' . $a['apartment_code'] . ' ' . $a['apartment_address'])) ?>">
 
                             <div class="apt-card-head">
                                 <div class="apt-card-icon">
@@ -432,14 +479,14 @@ try {
 
     <!-- APARTMENT SEARCH + CARD CLICK -->
     <script>
-        (function () {
+        (function() {
             "use strict";
             const BASE_URL = window.BASE_URL || "./";
             const grid = document.getElementById("aptGrid");
             const search = document.getElementById("aptSearch");
 
             /* Live search */
-            search?.addEventListener("input", function () {
+            search?.addEventListener("input", function() {
                 const q = this.value.trim().toLowerCase();
                 document.querySelectorAll(".apt-card").forEach(card => {
                     const hay = card.dataset.search || "";
@@ -448,7 +495,7 @@ try {
             });
 
             /* Card click → go to apartment page */
-            grid?.addEventListener("click", function (e) {
+            grid?.addEventListener("click", function(e) {
                 const card = e.target.closest(".apt-card");
                 if (!card) return;
 

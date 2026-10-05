@@ -39,21 +39,14 @@
                     History
                 </a>
             </li>
-            <li>
-                <a href="<?= BASE_URL ?>take-order.php">
-                    <i class="bi bi-bag-plus"></i>
-                    Take Order
-                </a>
-            </li>
-            <li>
-                <a href="<?= BASE_URL ?>orders.php">
-                    <i class="bi bi-bag-check"></i>
-                    My Orders
-                    <span class="badge">0</span>
-                </a>
-            </li>
 
 
+            <li>
+                <a href="<?= BASE_URL ?>customer-payment-wallet.php">
+                    <i class="bi bi-wallet2"></i>
+                    Customer Wallet
+                </a>
+            </li>
             <div class="sb-nav-title">Account</div>
 
             <li>
