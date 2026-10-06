@@ -23,19 +23,13 @@ if (!$boy || (int)$boy['status'] !== 1) {
     exit;
 }
 
-/* ---------------- GET APARTMENT CODE ---------------- */
+/* ---------------- APARTMENT ---------------- */
 $aptCode = trim($_GET['code'] ?? '');
 if ($aptCode === '') {
     header('Location: delivery-orders.php');
     exit;
 }
 
-/* ============================================================
-   REMOVED: apartment allocation check
-   Any delivery boy can now open any apartment's orders page.
-   ============================================================ */
-
-/* ---------------- APARTMENT ---------------- */
 $apartment = null;
 try {
     $stmt = $pdo->prepare(
@@ -544,14 +538,8 @@ $ordersJson = array_map(function ($o) {
             color: #b8893c;
         }
 
-        .ao-mini-btn.pay:hover:not(:disabled) {
-            background: #e7f6ec;
-            border-color: #a7c8a9;
-            color: #1f7a3d;
-        }
-
-        .ao-mini-btn.done {
-            background: #e7f6ec;
+        .ao-mini-btn.wallet:hover:not(:disabled) {
+            background: #f0f9f1;
             border-color: #a7c8a9;
             color: #1f7a3d;
         }
@@ -988,6 +976,164 @@ $ordersJson = array_map(function ($o) {
             background: #faf7f0;
         }
 
+        /* Wallet tabs inside modal */
+        .ao-wallet-tabs {
+            display: flex;
+            gap: 4px;
+            background: #faf7f0;
+            border-radius: 12px;
+            padding: 4px;
+            margin-bottom: 16px;
+        }
+
+        .ao-wallet-tab {
+            flex: 1;
+            height: 42px;
+            border-radius: 9px;
+            border: none;
+            background: transparent;
+            font-family: "DM Sans", sans-serif;
+            font-size: 12px;
+            font-weight: 800;
+            color: #817a71;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            transition: .15s ease;
+        }
+
+        .ao-wallet-tab.active {
+            background: #fff;
+            color: #302923;
+            box-shadow: 0 3px 10px rgba(48, 41, 35, .07);
+        }
+
+        .ao-wallet-tab.credit.active {
+            color: #1b5e20;
+        }
+
+        .ao-wallet-tab.debit.active {
+            color: #b51f2c;
+        }
+
+        .ao-wallet-balance {
+            background: linear-gradient(135deg, #fdfaf4 0%, #fff5f5 100%);
+            border: 1.5px solid #ece5da;
+            border-radius: 14px;
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+        }
+
+        .ao-wallet-balance .lbl {
+            font-size: 10px;
+            font-weight: 800;
+            color: #948c82;
+            text-transform: uppercase;
+            letter-spacing: .07em;
+            margin-bottom: 4px;
+        }
+
+        .ao-wallet-balance .val {
+            font-family: "Playfair Display", serif;
+            font-size: 24px;
+            font-weight: 700;
+            color: #b51f2c;
+            line-height: 1.1;
+        }
+
+        .ao-history-wrap {
+            max-height: 280px;
+            overflow-y: auto;
+            border: 1.5px solid #ece5da;
+            border-radius: 12px;
+            background: #fff;
+        }
+
+        .ao-history-wrap::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .ao-history-wrap::-webkit-scrollbar-thumb {
+            background: #e0d8cd;
+            border-radius: 4px;
+        }
+
+        .ao-history-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .ao-history-table th {
+            background: #faf7f0;
+            color: #938a80;
+            font-size: 9px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: .7px;
+            padding: 10px 12px;
+            border-bottom: 1px solid #eee7dc;
+            text-align: left;
+            position: sticky;
+            top: 0;
+            z-index: 2;
+        }
+
+        .ao-history-table td {
+            padding: 11px 12px;
+            border-bottom: 1px solid #f2ede5;
+            font-size: 11.5px;
+            color: #4c4640;
+            vertical-align: middle;
+        }
+
+        .ao-history-table tr:last-child td {
+            border-bottom: 0;
+        }
+
+        .ao-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 9.5px;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+
+        .ao-badge.credit {
+            background: #e8f1e8;
+            color: #52745b;
+        }
+
+        .ao-badge.debit {
+            background: #fbeaea;
+            color: #b51f2c;
+        }
+
+        .ao-amt-credit {
+            color: #1b5e20;
+            font-weight: 800;
+        }
+
+        .ao-amt-debit {
+            color: #b51f2c;
+            font-weight: 800;
+        }
+
+        .ao-bal-cell {
+            font-family: "Playfair Display", serif;
+            font-weight: 700;
+            color: #302923;
+        }
+
         .ao-toast {
             position: fixed;
             top: 84px;
@@ -1246,22 +1392,6 @@ $ordersJson = array_map(function ($o) {
                                                 </button>
                                             <?php endif; ?>
 
-                                            <?php if ($isPaid): ?>
-                                                <button type="button"
-                                                    class="ao-mini-btn done"
-                                                    disabled
-                                                    title="Already paid">
-                                                    <i class="bi bi-check-circle-fill"></i> Paid
-                                                </button>
-                                            <?php else: ?>
-                                                <button type="button"
-                                                    class="ao-mini-btn pay js-pay"
-                                                    data-id="<?= (int)$o['id'] ?>"
-                                                    title="Mark as paid">
-                                                    <i class="bi bi-cash-coin"></i> Pay
-                                                </button>
-                                            <?php endif; ?>
-
                                             <?php if ($hasContainer && $custPending > 0): ?>
                                                 <button type="button"
                                                     class="ao-mini-btn js-container"
@@ -1271,6 +1401,15 @@ $ordersJson = array_map(function ($o) {
                                                     <i class="bi bi-box2-heart"></i> Return
                                                 </button>
                                             <?php endif; ?>
+
+                                            <button type="button"
+                                                class="ao-mini-btn wallet js-wallet"
+                                                data-id="<?= (int)$o['id'] ?>"
+                                                data-mobile="<?= htmlspecialchars($o['customer_mobile']) ?>"
+                                                data-name="<?= htmlspecialchars($o['customer_name']) ?>"
+                                                title="Manage wallet">
+                                                <i class="bi bi-wallet2"></i> Wallet
+                                            </button>
                                         </div>
                                     </td>
                                 </tr>
@@ -1355,6 +1494,96 @@ $ordersJson = array_map(function ($o) {
                         </button>
                     </div>
                 </form>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- ================= WALLET MODAL ================= -->
+    <div class="ao-modal-overlay" id="aoWalletModal" aria-hidden="true">
+        <div class="ao-modal" role="dialog" aria-modal="true" style="max-width:520px;">
+            <div class="ao-modal-head">
+                <div>
+                    <h3>Manage Wallet</h3>
+                    <p id="walletModalSub">Add or deduct money from customer wallet</p>
+                </div>
+                <button type="button" class="ao-modal-close" id="walletModalClose">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+            <div class="ao-modal-body">
+
+                <div class="ao-info-list" style="margin-bottom:14px;" id="walletModalInfo"></div>
+
+                <div class="ao-wallet-balance">
+                    <div>
+                        <div class="lbl">Current Balance</div>
+                        <div class="val" id="walletBalance">₹0</div>
+                    </div>
+                    <span style="font-size:11px;color:#948c82;font-weight:700;" id="walletStatusLabel">—</span>
+                </div>
+
+                <div class="ao-wallet-tabs" id="walletTabs">
+                    <button type="button" class="ao-wallet-tab credit active" data-wtab="credit">
+                        <i class="bi bi-plus-circle"></i> Add Money
+                    </button>
+                    <button type="button" class="ao-wallet-tab debit" data-wtab="debit">
+                        <i class="bi bi-dash-circle"></i> Deduct Money
+                    </button>
+                </div>
+
+                <form id="walletForm" autocomplete="off">
+                    <input type="hidden" id="walletMobile" value="">
+                    <input type="hidden" id="walletTxnType" value="credit">
+
+                    <div class="ao-field">
+                        <label>Amount (₹) <span style="color:#b51f2c;">*</span></label>
+                        <input type="number" id="walletAmount" min="1" step="0.01" required placeholder="0.00">
+                        <div class="ao-quick-btns">
+                            <button type="button" class="ao-quick-btn" data-wamt="100">₹100</button>
+                            <button type="button" class="ao-quick-btn" data-wamt="500">₹500</button>
+                            <button type="button" class="ao-quick-btn" data-wamt="1000">₹1000</button>
+                            <button type="button" class="ao-quick-btn" data-wamt="2000">₹2000</button>
+                        </div>
+                    </div>
+
+                    <div class="ao-field">
+                        <label>Note (optional)</label>
+                        <textarea id="walletNote" maxlength="250" placeholder="e.g. cash received"></textarea>
+                    </div>
+
+                    <div class="ao-info-list" style="background:#fdfaf4;border:1px solid #f0ebe4;margin-bottom:6px;">
+                        <div class="ao-info-row">
+                            <span class="lbl">New Balance will be</span>
+                            <span class="val" id="walletPreview" style="font-family:'Playfair Display',serif;font-size:16px;color:#1f7a3d;font-weight:700;">₹0</span>
+                        </div>
+                    </div>
+
+                    <div class="ao-modal-actions">
+                        <button type="button" class="ao-modal-btn ghost" id="walletCancel">Cancel</button>
+                        <button type="submit" class="ao-modal-btn primary" id="walletSubmit">
+                            <i class="bi bi-check-lg"></i>
+                            <span id="walletSubmitText">Add Money</span>
+                        </button>
+                    </div>
+                </form>
+
+                <div style="margin-top:24px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;">
+                        <h4 style="margin:0;font-family:'Playfair Display',serif;font-size:14px;font-weight:700;color:#302923;">
+                            <i class="bi bi-clock-history" style="color:#b51f2c;margin-right:4px;"></i> Recent Transactions
+                        </h4>
+                        <button type="button" class="ao-mini-btn" id="walletRefreshHistory">
+                            <i class="bi bi-arrow-clockwise"></i> Refresh
+                        </button>
+                    </div>
+                    <div class="ao-history-wrap" id="walletHistory">
+                        <div style="padding:24px;text-align:center;color:#948c82;font-size:11.5px;">
+                            Loading…
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </div>
     </div>
