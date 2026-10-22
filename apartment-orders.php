@@ -53,25 +53,37 @@ $dateFilter   = trim($_GET['date']   ?? '');
 $allowedStatus = ['pending', 'delivered', 'all'];
 if (!in_array($statusFilter, $allowedStatus, true)) $statusFilter = 'pending';
 
-/* ---------------- ORDERS ---------------- */
+/* =========================================================
+   ORDERS
+   - customer_name / customer_mobile → customers table
+   - apartment_name / division_label → orders.address_json
+   - customer_id (orders) = MRSMCxxxxx (varchar)
+   ========================================================= */
 $orders = [];
 try {
-    $sql = "SELECT o.id, o.order_code, o.delivery_boy_id,
-                   o.customer_name, o.customer_mobile,
-                   o.apartment_name, o.apartment_code, o.division, o.division_charge,
-                   o.subtotal, o.total_amount,
-                   o.products_json,
-                   o.status, o.delivery_status, o.payment_status,
-                   o.payment_ref, o.paid_at, o.created_at, o.updated_at,
-                   oc.total_containers,
-                   oc.received_containers,
-                   (oc.total_containers - oc.received_containers) AS pending_containers,
-                   oc.container_amount,
-                   oc.status AS container_status
+    $sql = "SELECT
+                o.id, o.order_code, o.delivery_boy_id,
+                o.customer_id,
+                c.full_name       AS customer_name,
+                c.mobile_number   AS customer_mobile,
+                o.address_type, o.address_json,
+                o.division_charge, o.subtotal, o.total_amount,
+                o.products_json,
+                o.status, o.delivery_status, o.payment_status,
+                o.payment_ref, o.paid_at, o.created_at, o.updated_at,
+
+                oc.total_containers,
+                oc.received_containers,
+                (oc.total_containers - oc.received_containers) AS pending_containers,
+                oc.container_amount,
+                oc.status AS container_status
             FROM orders o
+            LEFT JOIN customers c ON c.customer_id = o.customer_id
             LEFT JOIN order_containers oc ON oc.order_id = o.id
-            WHERE o.apartment_code = ?
+            WHERE JSON_VALID(o.address_json)
+              AND JSON_UNQUOTE(JSON_EXTRACT(o.address_json, '$.apartment_code')) = ?
               AND o.delivery_boy_id = ?
+              AND o.delivery_mode = 'delivery'
               AND o.status <> 'cancelled'";
 
     $params = [$aptCode, $boyId];
@@ -91,47 +103,74 @@ try {
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
-    $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    /* Inject apartment_name / division_label from JSON */
+    foreach ($rows as &$r) {
+        $addr = json_decode($r['address_json'] ?? '[]', true);
+        if (!is_array($addr)) $addr = [];
+        $r['apartment_name'] = $addr['apartment_name'] ?? ($apartment['apartment_name'] ?? '');
+        $r['apartment_code'] = $addr['apartment_code'] ?? ($apartment['apartment_code'] ?? '');
+        $r['division']       = $addr['division_label'] ?? '';
+        $r['customer_name']  = $r['customer_name']  ?: '—';
+        $r['customer_mobile'] = $r['customer_mobile'] ?: '—';
+    }
+    unset($r);
+
+    $orders = $rows;
 } catch (PDOException $e) {
     $orders = [];
 }
 
-/* ---------------- CONTAINER SUMMARY ---------------- */
+/* =========================================================
+   CONTAINER SUMMARY (per customer, this apartment, this boy)
+   Use customer_id for grouping (customers.id) via oc.customer_id
+   Fall back to customer_id from orders
+   ========================================================= */
 $containerSummary = [];
 try {
     $sumStmt = $pdo->prepare(
-        "SELECT o.customer_mobile,
-                MAX(o.customer_name) AS customer_name,
-                SUM(oc.total_containers)     AS total_containers,
-                SUM(oc.received_containers)  AS received_containers,
-                SUM(oc.total_containers - oc.received_containers) AS pending_containers,
-                SUM(oc.container_amount)     AS container_amount,
-                COUNT(DISTINCT oc.order_id)  AS order_count
+        "SELECT
+            COALESCE(oc.customer_id,
+                     (SELECT c2.id FROM customers c2 WHERE c2.customer_id = o.customer_id LIMIT 1)
+            ) AS customer_row_id,
+            c.full_name     AS customer_name,
+            c.mobile_number AS customer_mobile,
+            SUM(oc.total_containers)     AS total_containers,
+            SUM(oc.received_containers)  AS received_containers,
+            SUM(oc.total_containers - oc.received_containers) AS pending_containers,
+            SUM(oc.container_amount)     AS container_amount,
+            COUNT(DISTINCT oc.order_id)  AS order_count
          FROM order_containers oc
-         INNER JOIN orders o ON o.id = oc.order_id
-         WHERE o.apartment_code = ?
+         INNER JOIN orders o    ON o.id = oc.order_id
+         LEFT  JOIN customers c ON c.customer_id = o.customer_id
+         WHERE JSON_VALID(o.address_json)
+           AND JSON_UNQUOTE(JSON_EXTRACT(o.address_json, '$.apartment_code')) = ?
            AND o.delivery_boy_id = ?
            AND o.status <> 'cancelled'
-         GROUP BY o.customer_mobile
+         GROUP BY customer_row_id, c.full_name, c.mobile_number
          HAVING SUM(oc.total_containers - oc.received_containers) > 0"
     );
     $sumStmt->execute([$aptCode, $boyId]);
     $rows = $sumStmt->fetchAll(PDO::FETCH_ASSOC);
 
     foreach ($rows as $r) {
-        $containerSummary[$r['customer_mobile']] = [
-            'customer_name'      => $r['customer_name'],
-            'total_containers'   => (int)$r['total_containers'],
+        $key = (string)($r['customer_mobile'] ?: ('cid_' . (int)$r['customer_row_id']));
+        $containerSummary[$key] = [
+            'customer_id'         => (int)($r['customer_row_id'] ?? 0),
+            'customer_name'       => $r['customer_name'] ?: '—',
+            'customer_mobile'     => $r['customer_mobile'] ?: '',
+            'total_containers'    => (int)$r['total_containers'],
             'received_containers' => (int)$r['received_containers'],
-            'pending_containers' => (int)$r['pending_containers'],
-            'container_amount'   => (float)$r['container_amount'],
-            'order_count'        => (int)$r['order_count'],
+            'pending_containers'  => (int)$r['pending_containers'],
+            'container_amount'    => (float)$r['container_amount'],
+            'order_count'         => (int)$r['order_count'],
         ];
     }
 } catch (PDOException $e) {
 }
 
-/* Prepare JS payload */
+/* Prepare JS payload — flat shape that apartment-orders.js expects */
 $ordersJson = array_map(function ($o) {
     return [
         'id'                 => (int)$o['id'],
@@ -976,7 +1015,6 @@ $ordersJson = array_map(function ($o) {
             background: #faf7f0;
         }
 
-        /* Wallet tabs inside modal */
         .ao-wallet-tabs {
             display: flex;
             gap: 4px;
@@ -1310,7 +1348,8 @@ $ordersJson = array_map(function ($o) {
                                 $recvCont     = (int)($o['received_containers'] ?? 0);
                                 $hasContainer = $totalCont > 0;
 
-                                $cust = $containerSummary[$o['customer_mobile']] ?? null;
+                                $sumKey = $o['customer_mobile'] !== '' ? $o['customer_mobile'] : '';
+                                $cust = $containerSummary[$sumKey] ?? null;
                                 $custPending  = $cust ? $cust['pending_containers'] : 0;
                                 $custTotal    = $cust ? $cust['total_containers'] : $totalCont;
                                 $custReceived = $cust ? $cust['received_containers'] : $recvCont;
@@ -1334,13 +1373,13 @@ $ordersJson = array_map(function ($o) {
                                     </td>
                                     <td>
                                         <span class="ao-name"><?= htmlspecialchars($o['customer_name']) ?></span>
-                                        <?php if ($mobile !== ''): ?>
+                                        <?php if ($mobile !== '' && $mobile !== '—'): ?>
                                             <a class="ao-phone" href="tel:<?= htmlspecialchars($mobile) ?>">
                                                 <i class="bi bi-telephone-fill"></i> <?= htmlspecialchars($o['customer_mobile']) ?>
                                             </a>
                                         <?php endif; ?>
                                     </td>
-                                    <td>Division <?= htmlspecialchars($o['division'] ?? '—') ?></td>
+                                    <td>Division <?= htmlspecialchars($o['division'] ?: '—') ?></td>
                                     <td><strong>₹<?= number_format((float)$o['total_amount'], 2) ?></strong></td>
                                     <td>
                                         <span class="ao-pill <?= $isPaid ? 'is-paid' : 'is-unpaid' ?>">
@@ -1392,7 +1431,7 @@ $ordersJson = array_map(function ($o) {
                                                 </button>
                                             <?php endif; ?>
 
-                                            <?php if ($hasContainer && $custPending > 0): ?>
+                                            <?php if ($hasContainer && $custPending > 0 && !empty($o['customer_mobile']) && $o['customer_mobile'] !== '—'): ?>
                                                 <button type="button"
                                                     class="ao-mini-btn js-container"
                                                     data-id="<?= (int)$o['id'] ?>"
@@ -1402,14 +1441,16 @@ $ordersJson = array_map(function ($o) {
                                                 </button>
                                             <?php endif; ?>
 
-                                            <button type="button"
-                                                class="ao-mini-btn wallet js-wallet"
-                                                data-id="<?= (int)$o['id'] ?>"
-                                                data-mobile="<?= htmlspecialchars($o['customer_mobile']) ?>"
-                                                data-name="<?= htmlspecialchars($o['customer_name']) ?>"
-                                                title="Manage wallet">
-                                                <i class="bi bi-wallet2"></i> Wallet
-                                            </button>
+                                            <?php if (!empty($o['customer_mobile']) && $o['customer_mobile'] !== '—'): ?>
+                                                <button type="button"
+                                                    class="ao-mini-btn wallet js-wallet"
+                                                    data-id="<?= (int)$o['id'] ?>"
+                                                    data-mobile="<?= htmlspecialchars($o['customer_mobile']) ?>"
+                                                    data-name="<?= htmlspecialchars($o['customer_name']) ?>"
+                                                    title="Manage wallet">
+                                                    <i class="bi bi-wallet2"></i> Wallet
+                                                </button>
+                                            <?php endif; ?>
                                         </div>
                                     </td>
                                 </tr>
@@ -1608,12 +1649,14 @@ $ordersJson = array_map(function ($o) {
             const overlay = document.getElementById("sbOverlay");
 
             function openSidebar() {
+                if (!sidebar) return;
                 sidebar.classList.add("open");
                 overlay.classList.add("show");
                 document.body.style.overflow = "hidden";
             }
 
             function closeSidebar() {
+                if (!sidebar) return;
                 sidebar.classList.remove("open");
                 overlay.classList.remove("show");
                 document.body.style.overflow = "";

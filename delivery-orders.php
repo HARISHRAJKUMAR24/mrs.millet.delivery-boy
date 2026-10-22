@@ -30,41 +30,88 @@ $logoUrl  = !empty($settings['logo_image']) ? ADMIN_URL . $settings['logo_image'
 $firstName = explode(' ', trim($boy['full_name']))[0];
 
 /* =========================================================
-   FETCH APARTMENTS THAT HAVE ORDERS FOR THIS DELIVERY BOY
-   Only apartments where this boy has at least one order
-   (pending OR delivered) are shown — no empty apartments.
+   FETCH GROUPS FOR THIS DELIVERY BOY
+   1) Apartment groups → grouped by apartment_code
+   2) Individual House groups → grouped by full_address
+   All data lives inside orders.address_json.
    ========================================================= */
-$apartments = [];
+$apartments      = [];   // grouped by apartment_code
+$individualHouses = [];  // grouped by full_address
+
 try {
-    $stmt = $pdo->prepare(
-        "SELECT a.id, a.apartment_code, a.apartment_name, a.apartment_address,
-                (SELECT COUNT(*)
-                 FROM orders o
-                 WHERE o.apartment_code = a.apartment_code
-                   AND o.delivery_boy_id = ?
-                   AND o.delivery_status = 'disabled'
-                   AND o.status <> 'cancelled') AS pending_count,
-                (SELECT COUNT(*)
-                 FROM orders o
-                 WHERE o.apartment_code = a.apartment_code
-                   AND o.delivery_boy_id = ?
-                   AND o.delivery_status = 'enabled') AS delivered_count
-         FROM apartments a
-         WHERE a.status = 1
-           AND EXISTS (
-                SELECT 1
-                FROM orders o
-                WHERE o.apartment_code = a.apartment_code
-                  AND o.delivery_boy_id = ?
-                  AND o.status <> 'cancelled'
-           )
-         ORDER BY a.apartment_name ASC"
+    /* ---- Apartment groups ---- */
+    $aptStmt = $pdo->prepare(
+        "SELECT
+            JSON_UNQUOTE(JSON_EXTRACT(o.address_json, '$.apartment_code')) AS apartment_code,
+            JSON_UNQUOTE(JSON_EXTRACT(o.address_json, '$.apartment_name')) AS apartment_name,
+            COUNT(*) AS total_count,
+            SUM(CASE WHEN o.status <> 'delivered' AND o.status <> 'cancelled' THEN 1 ELSE 0 END) AS pending_count,
+            SUM(CASE WHEN o.status = 'delivered' THEN 1 ELSE 0 END) AS delivered_count
+         FROM orders o
+         WHERE o.delivery_boy_id = ?
+           AND o.delivery_mode = 'delivery'
+           AND o.address_type = 'apartment'
+           AND o.status <> 'cancelled'
+           AND JSON_VALID(o.address_json)
+           AND JSON_UNQUOTE(JSON_EXTRACT(o.address_json, '$.apartment_code')) IS NOT NULL
+           AND JSON_UNQUOTE(JSON_EXTRACT(o.address_json, '$.apartment_code')) <> ''
+         GROUP BY apartment_code, apartment_name
+         ORDER BY apartment_name ASC"
     );
-    $stmt->execute([$boyId, $boyId, $boyId]);
-    $apartments = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $aptStmt->execute([$boyId]);
+    $apartments = $aptStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    /* Fetch real apartment_address from apartments table (optional) */
+    if (!empty($apartments)) {
+        $codes = array_map(fn($a) => $a['apartment_code'], $apartments);
+        $in = implode(',', array_fill(0, count($codes), '?'));
+        try {
+            $addrStmt = $pdo->prepare(
+                "SELECT apartment_code, apartment_address FROM apartments
+                 WHERE apartment_code IN ($in)"
+            );
+            $addrStmt->execute($codes);
+            $addrMap = [];
+            while ($r = $addrStmt->fetch(PDO::FETCH_ASSOC)) {
+                $addrMap[$r['apartment_code']] = $r['apartment_address'];
+            }
+            foreach ($apartments as &$a) {
+                $a['apartment_address'] = $addrMap[$a['apartment_code']] ?? '';
+            }
+            unset($a);
+        } catch (PDOException $e) {
+        }
+    }
+
+    /* ---- Individual House groups ---- */
+    $ihStmt = $pdo->prepare(
+        "SELECT
+            JSON_UNQUOTE(JSON_EXTRACT(o.address_json, '$.full_address')) AS full_address,
+            COUNT(*) AS total_count,
+            SUM(CASE WHEN o.status <> 'delivered' AND o.status <> 'cancelled' THEN 1 ELSE 0 END) AS pending_count,
+            SUM(CASE WHEN o.status = 'delivered' THEN 1 ELSE 0 END) AS delivered_count
+         FROM orders o
+         WHERE o.delivery_boy_id = ?
+           AND o.delivery_mode = 'delivery'
+           AND o.address_type = 'individual_house'
+           AND o.status <> 'cancelled'
+           AND JSON_VALID(o.address_json)
+           AND JSON_UNQUOTE(JSON_EXTRACT(o.address_json, '$.full_address')) IS NOT NULL
+           AND JSON_UNQUOTE(JSON_EXTRACT(o.address_json, '$.full_address')) <> ''
+         GROUP BY full_address
+         ORDER BY full_address ASC"
+    );
+    $ihStmt->execute([$boyId]);
+    $individualHouses = $ihStmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
     $apartments = [];
+    $individualHouses = [];
 }
+
+/* Total counters for the header card */
+$totalPending = 0;
+foreach ($apartments as $a) $totalPending += (int)$a['pending_count'];
+foreach ($individualHouses as $h) $totalPending += (int)$h['pending_count'];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -73,9 +120,6 @@ try {
     <?php include './includes/head.php'; ?>
 
     <style>
-        /* =====================================================
-           APARTMENT CARDS — DELIVERY BOY PANEL
-           ===================================================== */
         .do-page {
             padding: 24px 26px 40px;
         }
@@ -138,7 +182,7 @@ try {
             pointer-events: none;
         }
 
-        /* Card grid */
+        /* Apartment cards */
         .apt-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
@@ -199,6 +243,11 @@ try {
             font-size: 20px;
             flex-shrink: 0;
             box-shadow: 0 8px 20px rgba(181, 31, 44, .25);
+        }
+
+        .apt-card-icon.house {
+            background: linear-gradient(135deg, #2e7d32 0%, #1b5e20 100%);
+            box-shadow: 0 8px 20px rgba(46, 125, 50, .25);
         }
 
         .apt-card-info {
@@ -297,6 +346,56 @@ try {
             transform: translateX(3px);
         }
 
+        /* Section header */
+        .do-sec-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-family: "Playfair Display", serif;
+            font-size: 18px;
+            font-weight: 700;
+            color: #302923;
+            margin: 26px 0 14px;
+        }
+
+        .do-sec-title i {
+            width: 34px;
+            height: 34px;
+            border-radius: 10px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 15px;
+        }
+
+        .do-sec-title.apt i {
+            background: #fbe8e9;
+            color: #b51f2c;
+        }
+
+        .do-sec-title.house i {
+            background: #eef7f0;
+            color: #2e7d32;
+        }
+
+        .do-sec-title .count {
+            font-family: "DM Sans", sans-serif;
+            background: #f7f2ec;
+            color: #6f675f;
+            padding: 2px 10px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: .04em;
+            text-transform: none;
+            margin-left: 4px;
+        }
+
+        .do-sec-title.house .count {
+            background: #eef7f0;
+            color: #2e7d32;
+        }
+
         /* Empty state */
         .do-empty {
             text-align: center;
@@ -352,8 +451,8 @@ try {
             </button>
 
             <div class="tb-title">
-                <h2>My Apartments</h2>
-                <p>Click an apartment to view and deliver its orders</p>
+                <h2>My Deliveries</h2>
+                <p>Click a group to view and deliver its orders</p>
             </div>
 
             <div class="tb-actions">
@@ -372,73 +471,166 @@ try {
 
             <div class="do-head">
                 <div>
-                    <h1>My Apartments</h1>
-                    <p>Only apartments with your orders are shown here.</p>
+                    <h1>My Deliveries</h1>
+                    <p>
+                        <?php if ($totalPending > 0): ?>
+                            You have <strong><?= $totalPending ?></strong> pending order<?= $totalPending === 1 ? '' : 's' ?>.
+                        <?php else: ?>
+                            Only groups with your orders are shown here.
+                        <?php endif; ?>
+                    </p>
                 </div>
 
                 <div class="do-search">
                     <i class="bi bi-search"></i>
-                    <input type="text" id="aptSearch" placeholder="Search apartment...">
+                    <input type="text" id="aptSearch" placeholder="Search apartment or address...">
                 </div>
             </div>
 
-            <?php if (empty($apartments)): ?>
+            <?php if (empty($apartments) && empty($individualHouses)): ?>
+
                 <div class="do-empty">
                     <i class="bi bi-building"></i>
                     <h3>No orders yet</h3>
                     <p>You don't have any orders right now. Once orders are assigned to you, they'll appear here.</p>
                 </div>
+
             <?php else: ?>
-                <div class="apt-grid" id="aptGrid">
-                    <?php foreach ($apartments as $a):
-                        $pending   = (int)$a['pending_count'];
-                        $delivered = (int)$a['delivered_count'];
-                    ?>
-                        <div class="apt-card"
-                            data-code="<?= htmlspecialchars($a['apartment_code']) ?>"
-                            data-name="<?= htmlspecialchars($a['apartment_name']) ?>"
-                            data-search="<?= htmlspecialchars(strtolower($a['apartment_name'] . ' ' . $a['apartment_code'] . ' ' . $a['apartment_address'])) ?>">
 
-                            <div class="apt-card-head">
-                                <div class="apt-card-icon">
-                                    <i class="bi bi-building"></i>
+
+                <?php if (!empty($apartments)): ?>
+
+                    <h2 class="do-sec-title apt">
+                        <i class="bi bi-building"></i>
+                        Apartments
+                        <span class="count"><?= count($apartments) ?></span>
+                    </h2>
+
+                    <div class="apt-grid" id="aptGrid">
+                        <?php foreach ($apartments as $a):
+                            $pending   = (int)$a['pending_count'];
+                            $delivered = (int)$a['delivered_count'];
+                            $addr      = $a['apartment_address'] ?? '';
+                        ?>
+                            <div class="apt-card"
+                                data-type="apartment"
+                                data-code="<?= htmlspecialchars($a['apartment_code']) ?>"
+                                data-name="<?= htmlspecialchars($a['apartment_name']) ?>"
+                                data-search="<?= htmlspecialchars(strtolower(
+                                                    $a['apartment_name'] . ' ' . $a['apartment_code'] . ' ' . $addr
+                                                )) ?>">
+
+                                <div class="apt-card-head">
+                                    <div class="apt-card-icon">
+                                        <i class="bi bi-building"></i>
+                                    </div>
+                                    <div class="apt-card-info">
+                                        <p class="apt-card-name"><?= htmlspecialchars($a['apartment_name']) ?></p>
+                                        <p class="apt-card-code">#<?= htmlspecialchars($a['apartment_code']) ?></p>
+                                    </div>
                                 </div>
-                                <div class="apt-card-info">
-                                    <p class="apt-card-name"><?= htmlspecialchars($a['apartment_name']) ?></p>
-                                    <p class="apt-card-code">#<?= htmlspecialchars($a['apartment_code']) ?></p>
-                                </div>
-                            </div>
 
-                            <?php if (!empty($a['apartment_address'])): ?>
-                                <p class="apt-card-addr"><?= htmlspecialchars($a['apartment_address']) ?></p>
-                            <?php endif; ?>
-
-                            <div class="apt-card-foot">
-                                <?php if ($pending > 0): ?>
-                                    <span class="apt-count pending">
-                                        <i class="bi bi-hourglass-split"></i>
-                                        <?= $pending ?> pending
-                                    </span>
-                                <?php elseif ($delivered > 0): ?>
-                                    <span class="apt-count delivered">
-                                        <i class="bi bi-check-circle-fill"></i>
-                                        All done
-                                    </span>
-                                <?php else: ?>
-                                    <span class="apt-count zero">
-                                        <i class="bi bi-inbox"></i>
-                                        No orders
-                                    </span>
+                                <?php if ($addr !== ''): ?>
+                                    <p class="apt-card-addr"><?= htmlspecialchars($addr) ?></p>
                                 <?php endif; ?>
 
-                                <span class="apt-card-go">
-                                    <i class="bi bi-arrow-right"></i>
-                                </span>
-                            </div>
+                                <div class="apt-card-foot">
+                                    <?php if ($pending > 0): ?>
+                                        <span class="apt-count pending">
+                                            <i class="bi bi-hourglass-split"></i>
+                                            <?= $pending ?> pending
+                                        </span>
+                                    <?php elseif ($delivered > 0): ?>
+                                        <span class="apt-count delivered">
+                                            <i class="bi bi-check-circle-fill"></i>
+                                            All done
+                                        </span>
+                                    <?php else: ?>
+                                        <span class="apt-count zero">
+                                            <i class="bi bi-inbox"></i>
+                                            No orders
+                                        </span>
+                                    <?php endif; ?>
 
-                        </div>
-                    <?php endforeach; ?>
-                </div>
+                                    <span class="apt-card-go">
+                                        <i class="bi bi-arrow-right"></i>
+                                    </span>
+                                </div>
+
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+
+                <?php endif; ?>
+
+
+                <?php if (!empty($individualHouses)): ?>
+
+                    <h2 class="do-sec-title house">
+                        <i class="bi bi-house-door"></i>
+                        Individual Houses
+                        <span class="count"><?= count($individualHouses) ?></span>
+                    </h2>
+
+                    <div class="apt-grid" id="ihGrid">
+                        <?php foreach ($individualHouses as $h):
+                            $pending   = (int)$h['pending_count'];
+                            $delivered = (int)$h['delivered_count'];
+                            $addr      = $h['full_address'] ?? '';
+                        ?>
+                            <div class="apt-card"
+                                data-type="individual_house"
+                                data-address="<?= htmlspecialchars($addr) ?>"
+                                data-search="<?= htmlspecialchars(strtolower($addr)) ?>">
+
+                                <div class="apt-card-head">
+                                    <div class="apt-card-icon house">
+                                        <i class="bi bi-house-door"></i>
+                                    </div>
+                                    <div class="apt-card-info">
+                                        <p class="apt-card-name">Individual House</p>
+                                        <p class="apt-card-code">Delivery Address</p>
+                                    </div>
+                                </div>
+
+                                <p class="apt-card-addr" style="
+                                    background:#eef7f0;color:#2e7d32;
+                                    border-radius:9px;padding:8px 10px;
+                                    -webkit-line-clamp:3;line-clamp:3;
+                                    font-weight:600;">
+                                    <i class="bi bi-geo-alt-fill"></i>
+                                    <?= htmlspecialchars($addr) ?>
+                                </p>
+
+                                <div class="apt-card-foot">
+                                    <?php if ($pending > 0): ?>
+                                        <span class="apt-count pending">
+                                            <i class="bi bi-hourglass-split"></i>
+                                            <?= $pending ?> pending
+                                        </span>
+                                    <?php elseif ($delivered > 0): ?>
+                                        <span class="apt-count delivered">
+                                            <i class="bi bi-check-circle-fill"></i>
+                                            All done
+                                        </span>
+                                    <?php else: ?>
+                                        <span class="apt-count zero">
+                                            <i class="bi bi-inbox"></i>
+                                            No orders
+                                        </span>
+                                    <?php endif; ?>
+
+                                    <span class="apt-card-go">
+                                        <i class="bi bi-arrow-right"></i>
+                                    </span>
+                                </div>
+
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+
+                <?php endif; ?>
+
             <?php endif; ?>
 
         </main>
@@ -460,12 +652,14 @@ try {
             const overlay = document.getElementById("sbOverlay");
 
             function openSidebar() {
+                if (!sidebar) return;
                 sidebar.classList.add("open");
                 overlay.classList.add("show");
                 document.body.style.overflow = "hidden";
             }
 
             function closeSidebar() {
+                if (!sidebar) return;
                 sidebar.classList.remove("open");
                 overlay.classList.remove("show");
                 document.body.style.overflow = "";
@@ -477,15 +671,15 @@ try {
         })();
     </script>
 
-    <!-- APARTMENT SEARCH + CARD CLICK -->
+    <!-- APARTMENT / HOUSE SEARCH + CARD CLICK -->
     <script>
         (function() {
             "use strict";
+
             const BASE_URL = window.BASE_URL || "./";
-            const grid = document.getElementById("aptGrid");
             const search = document.getElementById("aptSearch");
 
-            /* Live search */
+            /* Live search across BOTH grids */
             search?.addEventListener("input", function() {
                 const q = this.value.trim().toLowerCase();
                 document.querySelectorAll(".apt-card").forEach(card => {
@@ -494,15 +688,22 @@ try {
                 });
             });
 
-            /* Card click → go to apartment page */
-            grid?.addEventListener("click", function(e) {
-                const card = e.target.closest(".apt-card");
-                if (!card) return;
+            /* Card click → navigate to order list for that group */
+            document.querySelectorAll(".apt-card").forEach(card => {
+                card.addEventListener("click", function() {
+                    const type = card.dataset.type;
 
-                const code = card.dataset.code;
-                if (!code) return;
+                    if (type === "individual_house") {
+                        const addr = card.dataset.address || "";
+                        if (!addr) return;
+                        window.location.href = BASE_URL + "individual-house-orders.php?address=" + encodeURIComponent(addr);
+                        return;
+                    }
 
-                window.location.href = BASE_URL + "apartment-orders.php?code=" + encodeURIComponent(code);
+                    const code = card.dataset.code;
+                    if (!code) return;
+                    window.location.href = BASE_URL + "apartment-orders.php?code=" + encodeURIComponent(code);
+                });
             });
         })();
     </script>

@@ -84,7 +84,7 @@ if ($dateTo !== null) {
 $whereSql = 'WHERE ' . implode(' AND ', $where);
 
 /* =========================================================
-   STATS (respect same filter)
+   STATS
    ========================================================= */
 $totalDelivered = 0;
 $totalRevenue   = 0;
@@ -102,9 +102,10 @@ try {
         $totalDelivered = (int)$row['cnt'];
         $totalRevenue   = (float)$row['revenue'];
     }
-} catch (PDOException $e) {}
+} catch (PDOException $e) {
+}
 
-/* Also total pending (not filtered by date for a cleaner overview) */
+/* Pending count (unfiltered) */
 $totalPending = 0;
 try {
     $stmt = $pdo->prepare(
@@ -115,7 +116,8 @@ try {
     );
     $stmt->execute([$boyId]);
     $totalPending = (int)$stmt->fetchColumn();
-} catch (PDOException $e) {}
+} catch (PDOException $e) {
+}
 
 /* =========================================================
    PAGINATION
@@ -128,7 +130,8 @@ try {
     $stmt = $pdo->prepare("SELECT COUNT(*) FROM orders o $whereSql");
     $stmt->execute($params);
     $totalRows = (int)$stmt->fetchColumn();
-} catch (PDOException $e) {}
+} catch (PDOException $e) {
+}
 
 $totalPages = max(1, (int)ceil($totalRows / $perPage));
 if ($page > $totalPages) $page = $totalPages;
@@ -136,26 +139,57 @@ if ($page > $totalPages) $page = $totalPages;
 $offset = ($page - 1) * $perPage;
 
 /* =========================================================
-   FETCH ORDER LIST
+   FETCH ORDER LIST (fixed for current DB)
+   - customer_name / mobile   → customers table
+   - apartment_name / division → orders.address_json
+   - pickup_branch_name → orders column (real)
    ========================================================= */
 $orders = [];
 try {
-    $sql = "SELECT o.id, o.order_code, o.customer_name, o.customer_mobile,
-                   o.apartment_name, o.division, o.delivery_mode, o.pickup_branch_name,
-                   o.total_amount, o.products_json, o.payment_status,
-                   o.paid_at, o.created_at, o.updated_at
+    $sql = "SELECT
+                o.id, o.order_code,
+                o.customer_id,
+                c.full_name     AS customer_name,
+                c.mobile_number AS customer_mobile,
+                o.address_type,
+                o.address_json,
+                o.delivery_mode,
+                o.pickup_branch_name,
+                o.total_amount,
+                o.products_json,
+                o.payment_status, o.paid_at,
+                o.created_at, o.updated_at
             FROM orders o
+            LEFT JOIN customers c ON c.customer_id = o.customer_id
             $whereSql
             ORDER BY o.updated_at DESC, o.id DESC
             LIMIT $perPage OFFSET $offset";
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
-    $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
-} catch (PDOException $e) {}
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    /* Inject apartment / division / full address from JSON */
+    foreach ($rows as &$r) {
+        $addr = json_decode($r['address_json'] ?? '[]', true);
+        if (!is_array($addr)) $addr = [];
+        $r['apartment_name'] = $addr['apartment_name'] ?? '';
+        $r['apartment_code'] = $addr['apartment_code'] ?? '';
+        $r['division']       = $addr['division_label'] ?? '';
+        $r['full_address']   = $addr['full_address'] ?? '';
+        $r['customer_name']  = $r['customer_name']  ?: '—';
+        $r['customer_mobile'] = $r['customer_mobile'] ?: '—';
+    }
+    unset($r);
+
+    $orders = $rows;
+} catch (PDOException $e) {
+    $orders = [];
+}
 
 /* ---------- helpers ---------- */
-function rupees($n) {
+function rupees($n)
+{
     return '₹' . number_format((int)round($n));
 }
 
@@ -163,7 +197,8 @@ function rupees($n) {
 $qsBase = $_GET;
 unset($qsBase['page']);
 
-function pageUrl($p, $qsBase) {
+function pageUrl($p, $qsBase)
+{
     $qsBase['page'] = $p;
     return '?' . http_build_query($qsBase);
 }
@@ -187,7 +222,9 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
     <?php include './includes/head.php'; ?>
 
     <style>
-        .hi-page { padding: 24px 26px 60px; }
+        .hi-page {
+            padding: 24px 26px 60px;
+        }
 
         .hi-header {
             display: flex;
@@ -197,6 +234,7 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
             margin-bottom: 18px;
             flex-wrap: wrap;
         }
+
         .hi-header h1 {
             font-family: "Playfair Display", serif;
             font-size: 26px;
@@ -204,7 +242,12 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
             color: #302923;
             margin: 0 0 4px;
         }
-        .hi-header p { margin: 0; color: #817a71; font-size: 12.5px; }
+
+        .hi-header p {
+            margin: 0;
+            color: #817a71;
+            font-size: 12.5px;
+        }
 
         .hi-range-label {
             display: inline-flex;
@@ -219,9 +262,6 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
             letter-spacing: .04em;
         }
 
-        /* =====================================================
-           FILTER BAR
-           ===================================================== */
         .hi-filters {
             background: #fff;
             border: 1.5px solid #eee7dc;
@@ -259,7 +299,11 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
             text-decoration: none;
             white-space: nowrap;
         }
-        .hi-tab:hover { color: #b51f2c; }
+
+        .hi-tab:hover {
+            color: #b51f2c;
+        }
+
         .hi-tab.active {
             background: #fff;
             color: #b51f2c;
@@ -274,7 +318,10 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
             color: #817a71;
             font-weight: 600;
         }
-        .hi-custom.show { display: inline-flex; }
+
+        .hi-custom.show {
+            display: inline-flex;
+        }
 
         .hi-custom input[type="date"] {
             height: 36px;
@@ -289,9 +336,10 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
             cursor: pointer;
             outline: none;
         }
+
         .hi-custom input[type="date"]:focus {
             border-color: #b51f2c;
-            box-shadow: 0 0 0 3px rgba(181,31,44,.08);
+            box-shadow: 0 0 0 3px rgba(181, 31, 44, .08);
         }
 
         .hi-apply-btn {
@@ -307,11 +355,11 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
             cursor: pointer;
             transition: .2s ease;
         }
-        .hi-apply-btn:hover { background: #8e1722; }
 
-        /* =====================================================
-           STAT CARDS
-           ===================================================== */
+        .hi-apply-btn:hover {
+            background: #8e1722;
+        }
+
         .hi-stats {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
@@ -338,8 +386,16 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
             font-size: 17px;
             margin-bottom: 12px;
         }
-        .hi-stat-icon.blue { background: #e5eefb; color: #1565c0; }
-        .hi-stat-icon.gold { background: #fdf1e2; color: #a35a0e; }
+
+        .hi-stat-icon.blue {
+            background: #e5eefb;
+            color: #1565c0;
+        }
+
+        .hi-stat-icon.gold {
+            background: #fdf1e2;
+            color: #a35a0e;
+        }
 
         .hi-stat-label {
             font-size: 10.5px;
@@ -358,8 +414,14 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
             line-height: 1.1;
             margin-bottom: 3px;
         }
-        .hi-stat-value.green { color: #1b5e20; }
-        .hi-stat-value.gold  { color: #a35a0e; }
+
+        .hi-stat-value.green {
+            color: #1b5e20;
+        }
+
+        .hi-stat-value.gold {
+            color: #a35a0e;
+        }
 
         .hi-stat-sub {
             font-size: 11px;
@@ -367,9 +429,6 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
             font-weight: 600;
         }
 
-        /* =====================================================
-           LIST CARD
-           ===================================================== */
         .hi-card {
             background: #fff;
             border: 1.5px solid #eee7dc;
@@ -397,6 +456,7 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
             color: #302923;
             margin: 0;
         }
+
         .hi-card-title i {
             width: 32px;
             height: 32px;
@@ -422,7 +482,6 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
             letter-spacing: .04em;
         }
 
-        /* Orders list */
         .hi-list {
             padding: 14px;
             display: flex;
@@ -440,6 +499,7 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
             background: #fffdf9;
             transition: .15s ease;
         }
+
         .hi-item:hover {
             border-color: #d98a91;
             background: #fff5f5;
@@ -459,7 +519,10 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
             box-shadow: 0 6px 14px rgba(31, 122, 61, .25);
         }
 
-        .hi-item-info { flex: 1; min-width: 0; }
+        .hi-item-info {
+            flex: 1;
+            min-width: 0;
+        }
 
         .hi-item-top {
             display: flex;
@@ -489,8 +552,30 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
             text-transform: uppercase;
             letter-spacing: .05em;
         }
-        .hi-mode.pickup   { background: #fdf1e2; color: #a35a0e; }
-        .hi-mode.delivery { background: #e5eefb; color: #1565c0; }
+
+        .hi-mode.pickup {
+            background: #fdf1e2;
+            color: #a35a0e;
+        }
+
+        .hi-mode.delivery {
+            background: #e5eefb;
+            color: #1565c0;
+        }
+
+        .hi-ih-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 8px;
+            border-radius: 6px;
+            background: #eef7f0;
+            color: #2e7d32;
+            font-size: 9.5px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: .05em;
+        }
 
         .hi-name {
             font-weight: 700;
@@ -529,18 +614,19 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
             font-weight: 600;
         }
 
-        /* Empty */
         .hi-empty {
             padding: 60px 20px;
             text-align: center;
             color: #948c82;
         }
+
         .hi-empty i {
             font-size: 44px;
             color: #ece5da;
             display: block;
             margin-bottom: 10px;
         }
+
         .hi-empty h3 {
             font-family: "Playfair Display", serif;
             font-size: 17px;
@@ -548,11 +634,12 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
             margin: 0 0 6px;
             font-weight: 700;
         }
-        .hi-empty p { margin: 0; font-size: 12.5px; }
 
-        /* =====================================================
-           PAGINATION
-           ===================================================== */
+        .hi-empty p {
+            margin: 0;
+            font-size: 12.5px;
+        }
+
         .hi-pagination {
             display: flex;
             align-items: center;
@@ -567,6 +654,7 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
             font-size: 12px;
             color: #817a71;
         }
+
         .hi-page-info strong {
             color: #302923;
             font-weight: 800;
@@ -595,11 +683,13 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
             text-decoration: none;
             transition: .15s ease;
         }
+
         .hi-page-btn:hover:not(.active):not(.disabled) {
             background: #fbe8e9;
             border-color: #d98a91;
             color: #b51f2c;
         }
+
         .hi-page-btn.active {
             background: #b51f2c;
             border-color: #b51f2c;
@@ -607,24 +697,58 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
             box-shadow: 0 4px 10px rgba(181, 31, 44, .25);
             cursor: default;
         }
+
         .hi-page-btn.disabled {
             opacity: .4;
             cursor: not-allowed;
             pointer-events: none;
         }
-        .hi-page-btn i { font-size: 11px; }
 
-        /* Responsive */
+        .hi-page-btn i {
+            font-size: 11px;
+        }
+
         @media (max-width: 768px) {
-            .hi-page { padding: 18px 14px 40px; }
-            .hi-stats { grid-template-columns: 1fr; }
-            .hi-item { flex-wrap: wrap; }
-            .hi-item-right { width: 100%; text-align: left; margin-top: 8px; }
-            .hi-filters { flex-direction: column; align-items: stretch; }
-            .hi-tabs { justify-content: center; }
-            .hi-pagination { flex-direction: column; align-items: stretch; }
-            .hi-page-controls { justify-content: center; flex-wrap: wrap; }
-            .hi-page-info { text-align: center; }
+            .hi-page {
+                padding: 18px 14px 40px;
+            }
+
+            .hi-stats {
+                grid-template-columns: 1fr;
+            }
+
+            .hi-item {
+                flex-wrap: wrap;
+            }
+
+            .hi-item-right {
+                width: 100%;
+                text-align: left;
+                margin-top: 8px;
+            }
+
+            .hi-filters {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .hi-tabs {
+                justify-content: center;
+            }
+
+            .hi-pagination {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .hi-page-controls {
+                justify-content: center;
+                flex-wrap: wrap;
+            }
+
+            .hi-page-info {
+                text-align: center;
+            }
         }
     </style>
 
@@ -674,15 +798,14 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
             </div>
 
 
-            <!-- ================= FILTERS ================= -->
             <form class="hi-filters" method="GET" id="hiFilterForm">
 
                 <div class="hi-tabs">
-                    <a href="?range=today"     class="hi-tab <?= $range === 'today'     ? 'active' : '' ?>">Today</a>
+                    <a href="?range=today" class="hi-tab <?= $range === 'today'     ? 'active' : '' ?>">Today</a>
                     <a href="?range=yesterday" class="hi-tab <?= $range === 'yesterday' ? 'active' : '' ?>">Yesterday</a>
-                    <a href="?range=week"      class="hi-tab <?= $range === 'week'      ? 'active' : '' ?>">Last 7 Days</a>
-                    <a href="?range=month"     class="hi-tab <?= $range === 'month'     ? 'active' : '' ?>">This Month</a>
-                    <a href="?range=all"       class="hi-tab <?= $range === 'all'       ? 'active' : '' ?>">All Time</a>
+                    <a href="?range=week" class="hi-tab <?= $range === 'week'      ? 'active' : '' ?>">Last 7 Days</a>
+                    <a href="?range=month" class="hi-tab <?= $range === 'month'     ? 'active' : '' ?>">This Month</a>
+                    <a href="?range=all" class="hi-tab <?= $range === 'all'       ? 'active' : '' ?>">All Time</a>
                     <a href="#" class="hi-tab <?= $range === 'custom' ? 'active' : '' ?>" id="hiCustomTab">Custom</a>
                 </div>
 
@@ -697,7 +820,6 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
             </form>
 
 
-            <!-- ================= STAT CARDS ================= -->
             <div class="hi-stats">
 
                 <div class="hi-stat">
@@ -730,7 +852,6 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
             </div>
 
 
-            <!-- ================= LIST ================= -->
             <div class="hi-card">
 
                 <div class="hi-card-head">
@@ -754,6 +875,7 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
                     <div class="hi-list">
                         <?php foreach ($orders as $o):
                             $isPickup = ($o['delivery_mode'] === 'pickup');
+                            $isIH     = (($o['address_type'] ?? '') === 'individual_house');
 
                             $products = json_decode($o['products_json'] ?? '[]', true);
                             $itemCount = 0;
@@ -776,6 +898,11 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
                                             <i class="bi <?= $isPickup ? 'bi-shop' : 'bi-truck' ?>"></i>
                                             <?= $isPickup ? 'Pickup' : 'Delivery' ?>
                                         </span>
+                                        <?php if (!$isPickup && $isIH): ?>
+                                            <span class="hi-ih-badge">
+                                                <i class="bi bi-house-door"></i> Individual House
+                                            </span>
+                                        <?php endif; ?>
                                     </div>
 
                                     <div class="hi-name">
@@ -785,6 +912,8 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
                                     <div class="hi-meta">
                                         <?php if ($isPickup): ?>
                                             <?= htmlspecialchars($o['pickup_branch_name'] ?: 'Store Pickup') ?>
+                                        <?php elseif ($isIH): ?>
+                                            <?= htmlspecialchars($o['full_address'] ?: '—') ?>
                                         <?php else: ?>
                                             <?= htmlspecialchars($o['apartment_name'] ?: '—') ?>
                                             <?php if (!empty($o['division'])): ?>
@@ -806,7 +935,6 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
                         <?php endforeach; ?>
                     </div>
 
-                    <!-- ================= PAGINATION ================= -->
                     <?php if ($totalPages > 1): ?>
                         <div class="hi-pagination">
 
@@ -817,20 +945,20 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
                             </div>
 
                             <div class="hi-page-controls">
-                                <!-- Prev -->
                                 <a href="<?= $page > 1 ? htmlspecialchars(pageUrl($page - 1, $qsBase)) : '#' ?>"
-                                   class="hi-page-btn <?= $page <= 1 ? 'disabled' : '' ?>"
-                                   aria-label="Previous">
+                                    class="hi-page-btn <?= $page <= 1 ? 'disabled' : '' ?>"
+                                    aria-label="Previous">
                                     <i class="bi bi-chevron-left"></i>
                                 </a>
 
                                 <?php
-                                /* Compact page numbers */
                                 $window = 1;
                                 $pages  = [];
                                 for ($i = 1; $i <= $totalPages; $i++) {
-                                    if ($i === 1 || $i === $totalPages ||
-                                        ($i >= $page - $window && $i <= $page + $window)) {
+                                    if (
+                                        $i === 1 || $i === $totalPages ||
+                                        ($i >= $page - $window && $i <= $page + $window)
+                                    ) {
                                         $pages[] = $i;
                                     }
                                 }
@@ -842,15 +970,15 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
                                     <?php endif; ?>
 
                                     <a href="<?= htmlspecialchars(pageUrl($p, $qsBase)) ?>"
-                                       class="hi-page-btn <?= $p === $page ? 'active' : '' ?>">
+                                        class="hi-page-btn <?= $p === $page ? 'active' : '' ?>">
                                         <?= $p ?>
                                     </a>
-                                <?php $prev = $p; endforeach; ?>
+                                <?php $prev = $p;
+                                endforeach; ?>
 
-                                <!-- Next -->
                                 <a href="<?= $page < $totalPages ? htmlspecialchars(pageUrl($page + 1, $qsBase)) : '#' ?>"
-                                   class="hi-page-btn <?= $page >= $totalPages ? 'disabled' : '' ?>"
-                                   aria-label="Next">
+                                    class="hi-page-btn <?= $page >= $totalPages ? 'disabled' : '' ?>"
+                                    aria-label="Next">
                                     <i class="bi bi-chevron-right"></i>
                                 </a>
                             </div>
@@ -866,19 +994,19 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
     </div>
 
 
-    <!-- Sidebar toggle -->
     <script>
-        (function () {
-            const sidebar  = document.getElementById("sidebar");
-            const toggle   = document.getElementById("menuToggle");
+        (function() {
+            const sidebar = document.getElementById("sidebar");
+            const toggle = document.getElementById("menuToggle");
             const closeBtn = document.getElementById("sidebarClose");
-            const overlay  = document.getElementById("sbOverlay");
+            const overlay = document.getElementById("sbOverlay");
 
             function openSidebar() {
                 sidebar.classList.add("open");
                 overlay.classList.add("show");
                 document.body.style.overflow = "hidden";
             }
+
             function closeSidebar() {
                 sidebar.classList.remove("open");
                 overlay.classList.remove("show");
@@ -890,7 +1018,6 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
             if (overlay) overlay.addEventListener("click", closeSidebar);
         })();
 
-        /* Custom tab toggle */
         (function() {
             var tab = document.getElementById("hiCustomTab");
             var box = document.getElementById("hiCustomBox");

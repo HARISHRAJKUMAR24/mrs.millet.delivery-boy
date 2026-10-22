@@ -12,30 +12,14 @@ header('Content-Type: application/json; charset=utf-8');
 
 /* Auth: delivery boy OR admin */
 $loggedIn = false;
-
-if (isset($_SESSION['delivery_boy_id']) && (int)$_SESSION['delivery_boy_id'] > 0) {
-    $loggedIn = true;
-}
-if (!$loggedIn && isset($_SESSION['admin_id']) && (int)$_SESSION['admin_id'] > 0) {
-    $loggedIn = true;
-}
-
-if (!$loggedIn) {
-    jsonResponse(false, 'Not logged in.');
-}
+if (isset($_SESSION['delivery_boy_id']) && (int)$_SESSION['delivery_boy_id'] > 0) $loggedIn = true;
+if (!$loggedIn && isset($_SESSION['admin_id']) && (int)$_SESSION['admin_id'] > 0) $loggedIn = true;
+if (!$loggedIn) jsonResponse(false, 'Not logged in.');
 
 $mobile = trim($_GET['mobile'] ?? '');
-
-if ($mobile === '') {
-    jsonResponse(false, 'Missing mobile.');
-}
+if ($mobile === '') jsonResponse(false, 'Missing mobile.');
 
 try {
-    /* Ensure wallet_balance column exists */
-    try {
-        $pdo->exec("ALTER TABLE customers ADD COLUMN wallet_balance DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER division_charge");
-    } catch (PDOException $e) {}
-
     $stmt = $pdo->prepare(
         "SELECT id, full_name, mobile_number,
                 COALESCE(wallet_balance, 0) AS wallet_balance,
@@ -61,5 +45,5 @@ try {
     ]);
 
 } catch (PDOException $e) {
-    jsonResponse(false, 'Lookup failed.');
+    jsonResponse(false, 'Lookup failed: ' . $e->getMessage());
 }
