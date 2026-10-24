@@ -25,217 +25,29 @@ if (!$boy || (int)$boy['status'] !== 1) {
 
 $settings = getSettings($pdo);
 $siteName = $settings['username'] ?? 'Mrs Mill@';
-
-/* =========================================================
-   DATE FILTER
-   ========================================================= */
-$range = $_GET['range'] ?? 'today';
-$from  = $_GET['from']  ?? '';
-$to    = $_GET['to']    ?? '';
-
-$dateFrom = null;
-$dateTo   = null;
-
-switch ($range) {
-    case 'today':
-        $dateFrom = date('Y-m-d 00:00:00');
-        $dateTo   = date('Y-m-d 23:59:59');
-        break;
-    case 'yesterday':
-        $dateFrom = date('Y-m-d 00:00:00', strtotime('-1 day'));
-        $dateTo   = date('Y-m-d 23:59:59', strtotime('-1 day'));
-        break;
-    case 'week':
-        $dateFrom = date('Y-m-d 00:00:00', strtotime('-6 days'));
-        $dateTo   = date('Y-m-d 23:59:59');
-        break;
-    case 'month':
-        $dateFrom = date('Y-m-01 00:00:00');
-        $dateTo   = date('Y-m-d 23:59:59');
-        break;
-    case 'custom':
-        if ($from && preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) {
-            $dateFrom = $from . ' 00:00:00';
-        }
-        if ($to && preg_match('/^\d{4}-\d{2}-\d{2}$/', $to)) {
-            $dateTo = $to . ' 23:59:59';
-        }
-        break;
-    case 'all':
-    default:
-        $dateFrom = null;
-        $dateTo   = null;
-        break;
-}
-
-/* Build WHERE for delivered orders */
-$where  = ["o.delivery_boy_id = ?", "o.status <> 'cancelled'", "o.delivery_status = 'enabled'"];
-$params = [$boyId];
-
-if ($dateFrom !== null) {
-    $where[]  = "o.updated_at >= ?";
-    $params[] = $dateFrom;
-}
-if ($dateTo !== null) {
-    $where[]  = "o.updated_at <= ?";
-    $params[] = $dateTo;
-}
-
-$whereSql = 'WHERE ' . implode(' AND ', $where);
-
-/* =========================================================
-   STATS
-   ========================================================= */
-$totalDelivered = 0;
-$totalRevenue   = 0;
-
-try {
-    $stmt = $pdo->prepare(
-        "SELECT COUNT(*) AS cnt, COALESCE(SUM(o.total_amount), 0) AS revenue
-         FROM orders o
-         $whereSql"
-    );
-    $stmt->execute($params);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
-
-    if ($row) {
-        $totalDelivered = (int)$row['cnt'];
-        $totalRevenue   = (float)$row['revenue'];
-    }
-} catch (PDOException $e) {
-}
-
-/* Pending count (unfiltered) */
-$totalPending = 0;
-try {
-    $stmt = $pdo->prepare(
-        "SELECT COUNT(*) FROM orders
-         WHERE delivery_boy_id = ?
-           AND status <> 'cancelled'
-           AND delivery_status = 'disabled'"
-    );
-    $stmt->execute([$boyId]);
-    $totalPending = (int)$stmt->fetchColumn();
-} catch (PDOException $e) {
-}
-
-/* =========================================================
-   PAGINATION
-   ========================================================= */
-$perPage = 10;
-$page    = max(1, (int)($_GET['page'] ?? 1));
-
-$totalRows = 0;
-try {
-    $stmt = $pdo->prepare("SELECT COUNT(*) FROM orders o $whereSql");
-    $stmt->execute($params);
-    $totalRows = (int)$stmt->fetchColumn();
-} catch (PDOException $e) {
-}
-
-$totalPages = max(1, (int)ceil($totalRows / $perPage));
-if ($page > $totalPages) $page = $totalPages;
-
-$offset = ($page - 1) * $perPage;
-
-/* =========================================================
-   FETCH ORDER LIST (fixed for current DB)
-   - customer_name / mobile   → customers table
-   - apartment_name / division → orders.address_json
-   - pickup_branch_name → orders column (real)
-   ========================================================= */
-$orders = [];
-try {
-    $sql = "SELECT
-                o.id, o.order_code,
-                o.customer_id,
-                c.full_name     AS customer_name,
-                c.mobile_number AS customer_mobile,
-                o.address_type,
-                o.address_json,
-                o.delivery_mode,
-                o.pickup_branch_name,
-                o.total_amount,
-                o.products_json,
-                o.payment_status, o.paid_at,
-                o.created_at, o.updated_at
-            FROM orders o
-            LEFT JOIN customers c ON c.customer_id = o.customer_id
-            $whereSql
-            ORDER BY o.updated_at DESC, o.id DESC
-            LIMIT $perPage OFFSET $offset";
-
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    /* Inject apartment / division / full address from JSON */
-    foreach ($rows as &$r) {
-        $addr = json_decode($r['address_json'] ?? '[]', true);
-        if (!is_array($addr)) $addr = [];
-        $r['apartment_name'] = $addr['apartment_name'] ?? '';
-        $r['apartment_code'] = $addr['apartment_code'] ?? '';
-        $r['division']       = $addr['division_label'] ?? '';
-        $r['full_address']   = $addr['full_address'] ?? '';
-        $r['customer_name']  = $r['customer_name']  ?: '—';
-        $r['customer_mobile'] = $r['customer_mobile'] ?: '—';
-    }
-    unset($r);
-
-    $orders = $rows;
-} catch (PDOException $e) {
-    $orders = [];
-}
-
-/* ---------- helpers ---------- */
-function rupees($n)
-{
-    return '₹' . number_format((int)round($n));
-}
-
-/* Preserve current query string for pagination links */
-$qsBase = $_GET;
-unset($qsBase['page']);
-
-function pageUrl($p, $qsBase)
-{
-    $qsBase['page'] = $p;
-    return '?' . http_build_query($qsBase);
-}
-
-/* Label for active range */
-$rangeLabels = [
-    'today'     => 'Today',
-    'yesterday' => 'Yesterday',
-    'week'      => 'Last 7 Days',
-    'month'     => 'This Month',
-    'custom'    => 'Custom Range',
-    'all'       => 'All Time',
-];
-$activeLabel = $rangeLabels[$range] ?? 'Today';
 ?>
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
-
     <?php include './includes/head.php'; ?>
 
     <style>
-        .hi-page {
-            padding: 24px 26px 60px;
+        /* Keep all your existing styles — no changes */
+        .pw-page {
+            padding: 24px 26px 40px;
         }
 
-        .hi-header {
+        .pw-header {
             display: flex;
             align-items: center;
             justify-content: space-between;
             gap: 16px;
-            margin-bottom: 18px;
+            margin-bottom: 20px;
             flex-wrap: wrap;
         }
 
-        .hi-header h1 {
+        .pw-header h1 {
             font-family: "Playfair Display", serif;
             font-size: 26px;
             font-weight: 700;
@@ -243,515 +55,967 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
             margin: 0 0 4px;
         }
 
-        .hi-header p {
+        .pw-header p {
             margin: 0;
             color: #817a71;
             font-size: 12.5px;
         }
 
-        .hi-range-label {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 6px 14px;
-            border-radius: 999px;
-            background: #e8f6ea;
-            color: #1b5e20;
-            font-size: 11.5px;
-            font-weight: 800;
-            letter-spacing: .04em;
+        .pw-card {
+            background: #fff;
+            border: 1.5px solid #ece5da;
+            border-radius: 20px;
+            padding: 22px;
         }
 
-        .hi-filters {
-            background: #fff;
-            border: 1.5px solid #eee7dc;
-            border-radius: 16px;
-            padding: 14px 16px;
+        .pw-list-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 15px;
             margin-bottom: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 14px;
             flex-wrap: wrap;
         }
 
-        .hi-tabs {
-            display: inline-flex;
-            background: #fdfaf4;
-            border: 1.5px solid #ece5da;
-            border-radius: 11px;
-            padding: 4px;
-            gap: 4px;
-            flex-wrap: wrap;
-        }
-
-        .hi-tab {
-            border: none;
-            background: transparent;
-            padding: 8px 14px;
-            font-family: "DM Sans", sans-serif;
-            font-size: 11.5px;
-            font-weight: 700;
-            color: #6f675f;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: .2s ease;
-            text-decoration: none;
-            white-space: nowrap;
-        }
-
-        .hi-tab:hover {
-            color: #b51f2c;
-        }
-
-        .hi-tab.active {
-            background: #fff;
-            color: #b51f2c;
-            box-shadow: 0 4px 12px rgba(48, 41, 35, .08);
-        }
-
-        .hi-custom {
-            display: none;
-            align-items: center;
-            gap: 8px;
-            font-size: 11.5px;
-            color: #817a71;
-            font-weight: 600;
-        }
-
-        .hi-custom.show {
-            display: inline-flex;
-        }
-
-        .hi-custom input[type="date"] {
-            height: 36px;
-            border: 1.5px solid #ece5da;
-            background: #fff;
-            border-radius: 9px;
-            padding: 0 10px;
-            font-family: "DM Sans", sans-serif;
-            font-size: 11.5px;
-            color: #302923;
-            font-weight: 700;
-            cursor: pointer;
-            outline: none;
-        }
-
-        .hi-custom input[type="date"]:focus {
-            border-color: #b51f2c;
-            box-shadow: 0 0 0 3px rgba(181, 31, 44, .08);
-        }
-
-        .hi-apply-btn {
-            height: 36px;
-            padding: 0 16px;
-            border-radius: 9px;
-            border: none;
-            background: #b51f2c;
-            color: #fff;
-            font-family: "DM Sans", sans-serif;
-            font-size: 11.5px;
-            font-weight: 800;
-            cursor: pointer;
-            transition: .2s ease;
-        }
-
-        .hi-apply-btn:hover {
-            background: #8e1722;
-        }
-
-        .hi-stats {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 14px;
-            margin-bottom: 22px;
-        }
-
-        .hi-stat {
-            background: #fff;
-            border: 1.5px solid #eee7dc;
-            border-radius: 16px;
-            padding: 16px 18px;
-        }
-
-        .hi-stat-icon {
-            width: 38px;
-            height: 38px;
-            border-radius: 11px;
-            background: #e8f6ea;
-            color: #1b5e20;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 17px;
-            margin-bottom: 12px;
-        }
-
-        .hi-stat-icon.blue {
-            background: #e5eefb;
-            color: #1565c0;
-        }
-
-        .hi-stat-icon.gold {
-            background: #fdf1e2;
-            color: #a35a0e;
-        }
-
-        .hi-stat-label {
-            font-size: 10.5px;
-            font-weight: 800;
-            color: #948c82;
-            text-transform: uppercase;
-            letter-spacing: .8px;
-            margin-bottom: 4px;
-        }
-
-        .hi-stat-value {
-            font-family: "Playfair Display", serif;
-            font-size: 24px;
-            font-weight: 700;
-            color: #302923;
-            line-height: 1.1;
-            margin-bottom: 3px;
-        }
-
-        .hi-stat-value.green {
-            color: #1b5e20;
-        }
-
-        .hi-stat-value.gold {
-            color: #a35a0e;
-        }
-
-        .hi-stat-sub {
-            font-size: 11px;
-            color: #948c82;
-            font-weight: 600;
-        }
-
-        .hi-card {
-            background: #fff;
-            border: 1.5px solid #eee7dc;
-            border-radius: 18px;
-            overflow: hidden;
-        }
-
-        .hi-card-head {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            padding: 18px 20px;
-            border-bottom: 1.5px solid #f0ebe4;
-            flex-wrap: wrap;
-        }
-
-        .hi-card-title {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            font-family: "Playfair Display", serif;
-            font-size: 17px;
-            font-weight: 700;
-            color: #302923;
+        .pw-list-title h3 {
             margin: 0;
+            font-size: 16px;
+            font-weight: 700;
+            color: #302923;
         }
 
-        .hi-card-title i {
-            width: 32px;
-            height: 32px;
-            border-radius: 10px;
-            background: #e8f6ea;
-            color: #1b5e20;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 14px;
+        .pw-list-title span {
+            display: block;
+            margin-top: 4px;
+            font-size: 10px;
+            color: #817a71;
         }
 
-        .hi-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            padding: 5px 12px;
-            border-radius: 999px;
-            background: #e8f6ea;
-            color: #1b5e20;
-            font-size: 11px;
-            font-weight: 800;
-            letter-spacing: .04em;
+        .pw-search {
+            position: relative;
+            width: 260px;
         }
 
-        .hi-list {
-            padding: 14px;
+        .pw-search i {
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #aaa198;
+            font-size: 13px;
+            pointer-events: none;
+        }
+
+        .pw-search input {
+            width: 100%;
+            height: 42px;
+            border: 1.5px solid #ece5da;
+            border-radius: 11px;
+            padding: 0 14px 0 38px;
+            font-family: "DM Sans", sans-serif;
+            font-size: 12.5px;
+            background: #fffdf9;
+            outline: none;
+            transition: .15s ease;
+        }
+
+        .pw-search input:focus {
+            border-color: #b51f2c;
+            background: #fff;
+            box-shadow: 0 0 0 4px rgba(181, 31, 44, .08);
+        }
+
+        .pw-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 14px;
+        }
+
+        .pw-cust {
+            background: #fff;
+            border: 1.5px solid #ece5da;
+            border-radius: 16px;
+            padding: 16px;
+            cursor: pointer;
+            transition: .2s ease;
             display: flex;
             flex-direction: column;
             gap: 12px;
         }
 
-        .hi-item {
+        .pw-cust:hover {
+            border-color: #d98a91;
+            transform: translateY(-3px);
+            box-shadow: 0 12px 28px -10px rgba(48, 41, 35, .15);
+        }
+
+        .pw-cust-head {
             display: flex;
             align-items: center;
-            gap: 14px;
-            padding: 14px 16px;
-            border: 1.5px solid #f0ebe4;
-            border-radius: 14px;
-            background: #fffdf9;
-            transition: .15s ease;
+            gap: 12px;
         }
 
-        .hi-item:hover {
-            border-color: #d98a91;
-            background: #fff5f5;
-        }
-
-        .hi-item-icon {
-            width: 44px;
-            height: 44px;
-            border-radius: 12px;
-            background: linear-gradient(135deg, #1f7a3d 0%, #2e7d32 100%);
+        .pw-cust-avatar {
+            width: 48px;
+            height: 48px;
+            border-radius: 13px;
+            background: linear-gradient(135deg, #b51f2c 0%, #8e1722 100%);
             color: #fff;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 18px;
+            font-size: 15px;
+            font-weight: 800;
             flex-shrink: 0;
-            box-shadow: 0 6px 14px rgba(31, 122, 61, .25);
+            box-shadow: 0 6px 14px rgba(181, 31, 44, .22);
         }
 
-        .hi-item-info {
+        .pw-cust-info {
             flex: 1;
             min-width: 0;
         }
 
-        .hi-item-top {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-
-        .hi-code {
-            font-family: "DM Sans", sans-serif;
+        .pw-cust-name {
             font-weight: 800;
-            color: #b51f2c;
-            font-size: 13px;
-            letter-spacing: .3px;
-        }
-
-        .hi-mode {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            padding: 3px 8px;
-            border-radius: 6px;
-            background: #f1ece4;
-            color: #6f675f;
-            font-size: 9.5px;
-            font-weight: 800;
-            text-transform: uppercase;
-            letter-spacing: .05em;
-        }
-
-        .hi-mode.pickup {
-            background: #fdf1e2;
-            color: #a35a0e;
-        }
-
-        .hi-mode.delivery {
-            background: #e5eefb;
-            color: #1565c0;
-        }
-
-        .hi-ih-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            padding: 3px 8px;
-            border-radius: 6px;
-            background: #eef7f0;
-            color: #2e7d32;
-            font-size: 9.5px;
-            font-weight: 800;
-            text-transform: uppercase;
-            letter-spacing: .05em;
-        }
-
-        .hi-name {
-            font-weight: 700;
             color: #302923;
-            font-size: 13px;
-            margin-top: 4px;
+            font-size: 13.5px;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
 
-        .hi-meta {
-            font-size: 11px;
+        .pw-cust-mobile {
+            font-size: 11.5px;
             color: #948c82;
             margin-top: 3px;
             font-weight: 600;
         }
 
-        .hi-item-right {
-            text-align: right;
+        .pw-address {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            padding: 10px 12px;
+            background: #fdfaf4;
+            border: 1px solid #f0ebe4;
+            border-radius: 10px;
+        }
+
+        .pw-address-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11.5px;
+            color: #4e4841;
+            font-weight: 600;
+        }
+
+        .pw-address-row i {
+            color: #b51f2c;
+            font-size: 12px;
             flex-shrink: 0;
-        }
-
-        .hi-amount {
-            font-family: "Playfair Display", serif;
-            font-weight: 700;
-            color: #1b5e20;
-            font-size: 15px;
-            margin: 0;
-        }
-
-        .hi-time {
-            font-size: 10.5px;
-            color: #948c82;
-            margin-top: 3px;
-            font-weight: 600;
-        }
-
-        .hi-empty {
-            padding: 60px 20px;
+            width: 14px;
             text-align: center;
+        }
+
+        .pw-address-row span {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .pw-address-row .lbl {
+            font-weight: 700;
+            color: #302923;
+            margin-right: 2px;
+        }
+
+        .pw-cust-foot {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-top: 12px;
+            border-top: 1px dashed #f0ebe4;
+            gap: 10px;
+        }
+
+        .pw-wallet {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 5px 12px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 800;
+            background: #e8f6ea;
+            color: #1f7a3d;
+        }
+
+        .pw-wallet.zero {
+            background: #f4efe8;
             color: #948c82;
         }
 
-        .hi-empty i {
+        .pw-cust-go {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: #f7f2ec;
+            color: #6f675f;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            transition: .2s ease;
+        }
+
+        .pw-cust:hover .pw-cust-go {
+            background: #b51f2c;
+            color: #fff;
+            transform: translateX(3px);
+        }
+
+        .pw-empty {
+            text-align: center;
+            padding: 60px 20px;
+            color: #948c82;
+            grid-column: 1 / -1;
+        }
+
+        .pw-empty i {
             font-size: 44px;
             color: #ece5da;
             display: block;
             margin-bottom: 10px;
         }
 
-        .hi-empty h3 {
+        .pw-empty h3 {
             font-family: "Playfair Display", serif;
             font-size: 17px;
-            color: #6f675f;
+            color: #302923;
             margin: 0 0 6px;
-            font-weight: 700;
         }
 
-        .hi-empty p {
-            margin: 0;
+        .pw-empty p {
             font-size: 12.5px;
+            margin: 0;
         }
 
-        .hi-pagination {
+        .pw-pagination {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 12px;
-            padding: 16px 20px;
-            border-top: 1.5px solid #f0ebe4;
+            gap: 15px;
+            margin-top: 22px;
+            padding-top: 16px;
+            border-top: 1px solid #f2ede5;
             flex-wrap: wrap;
         }
 
-        .hi-page-info {
-            font-size: 12px;
+        .pw-pag-info {
+            font-size: 11px;
             color: #817a71;
         }
 
-        .hi-page-info strong {
+        .pw-pag-info strong {
             color: #302923;
-            font-weight: 800;
+            font-weight: 700;
         }
 
-        .hi-page-controls {
+        .pw-pag-left {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            flex-wrap: wrap;
+        }
+
+        .pw-perpage {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            color: #817a71;
+        }
+
+        .pw-perpage select {
+            height: 32px;
+            border: 1px solid #eee7dc;
+            border-radius: 8px;
+            background: #fffdf9;
+            padding: 0 26px 0 10px;
+            font-family: inherit;
+            font-size: 11px;
+            font-weight: 700;
+            color: #4c4640;
+            cursor: pointer;
+            outline: none;
+            appearance: none;
+            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 16 16'><path fill='%23817a71' d='M8 11L3 6h10z'/></svg>");
+            background-repeat: no-repeat;
+            background-position: right 9px center;
+        }
+
+        .pw-pag-controls {
             display: flex;
             align-items: center;
             gap: 4px;
+            flex-wrap: wrap;
         }
 
-        .hi-page-btn {
+        .pw-pag-controls button {
             min-width: 34px;
             height: 34px;
-            padding: 0 10px;
             border-radius: 9px;
+            border: 1px solid #eee7dc;
+            background: #fff;
+            color: #6f675f;
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 8px;
+            font-family: inherit;
+        }
+
+        .pw-pag-controls button:hover:not(:disabled):not(.active) {
+            background: #faf7f0;
+            border-color: #e4ddd3;
+            color: #302923;
+        }
+
+        .pw-pag-controls button.active {
+            background: #b51f2c;
+            border-color: #b51f2c;
+            color: #fff;
+            cursor: default;
+        }
+
+        .pw-pag-controls button:disabled {
+            opacity: .4;
+            cursor: not-allowed;
+        }
+
+        .pw-pag-controls .ellipsis {
+            min-width: 26px;
+            height: 34px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: #b5aca2;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .pw-modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(30, 25, 22, .55);
+            backdrop-filter: blur(4px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            z-index: 9999;
+            opacity: 0;
+            visibility: hidden;
+            transition: .22s ease;
+            overflow-y: auto;
+        }
+
+        .pw-modal-overlay.show {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .pw-modal {
+            background: #fff;
+            border-radius: 20px;
+            padding: 26px;
+            max-width: 720px;
+            width: 100%;
+            box-shadow: 0 30px 80px rgba(0, 0, 0, .28);
+            transform: translateY(15px) scale(.96);
+            transition: transform .25s cubic-bezier(.2, .9, .3, 1.2);
+            position: relative;
+            margin: auto;
+            max-height: 92vh;
+            overflow-y: auto;
+        }
+
+        .pw-modal-overlay.show .pw-modal {
+            transform: translateY(0) scale(1);
+        }
+
+        .pw-modal-close {
+            position: absolute;
+            top: 14px;
+            right: 14px;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            border: 1.5px solid #eee7dc;
+            background: #fff;
+            color: #6f675f;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+        }
+
+        .pw-modal-close:hover {
+            background: #fbe8e9;
+            border-color: #f1c8cc;
+            color: #b51f2c;
+        }
+
+        .pw-modal-head {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 18px;
+            padding-right: 40px;
+        }
+
+        .pw-modal-avatar {
+            width: 54px;
+            height: 54px;
+            border-radius: 15px;
+            background: linear-gradient(135deg, #b51f2c 0%, #8e1722 100%);
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            font-weight: 800;
+            flex-shrink: 0;
+            box-shadow: 0 8px 20px rgba(181, 31, 44, .25);
+        }
+
+        .pw-modal-head h3 {
+            margin: 0 0 3px;
+            font-family: "Playfair Display", serif;
+            font-size: 19px;
+            font-weight: 700;
+            color: #302923;
+        }
+
+        .pw-modal-head p {
+            margin: 0;
+            font-size: 11.5px;
+            color: #948c82;
+            font-weight: 600;
+        }
+
+        .pw-balance-strip {
+            background: linear-gradient(135deg, #fdfaf4 0%, #fff5f5 100%);
+            border: 1.5px solid #ece5da;
+            border-radius: 14px;
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            flex-wrap: wrap;
+            margin-bottom: 18px;
+        }
+
+        .pw-balance-strip .lbl {
+            font-size: 10px;
+            font-weight: 800;
+            color: #948c82;
+            text-transform: uppercase;
+            letter-spacing: .07em;
+            margin-bottom: 4px;
+        }
+
+        .pw-balance-strip .val {
+            font-family: "Playfair Display", serif;
+            font-size: 24px;
+            font-weight: 700;
+            color: #b51f2c;
+            line-height: 1.1;
+        }
+
+        .pw-tabs {
+            display: flex;
+            gap: 4px;
+            background: #faf7f0;
+            border-radius: 12px;
+            padding: 4px;
+            margin-bottom: 18px;
+        }
+
+        .pw-tab {
+            flex: 1;
+            height: 42px;
+            border-radius: 9px;
+            border: none;
+            background: transparent;
+            font-family: "DM Sans", sans-serif;
+            font-size: 12px;
+            font-weight: 800;
+            color: #817a71;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            transition: .15s ease;
+        }
+
+        .pw-tab.active {
+            background: #fff;
+            color: #302923;
+            box-shadow: 0 3px 10px rgba(48, 41, 35, .07);
+        }
+
+        .pw-tab.credit.active {
+            color: #1b5e20;
+        }
+
+        .pw-tab.debit.active {
+            color: #b51f2c;
+        }
+
+        .pw-field {
+            margin-bottom: 14px;
+        }
+
+        .pw-field label {
+            display: block;
+            font-size: 10.5px;
+            font-weight: 800;
+            color: #4e4841;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: .05em;
+        }
+
+        .pw-field input,
+        .pw-field textarea {
+            width: 100%;
+            height: 46px;
+            border: 1.5px solid #ece5da;
+            background: #fffdf9;
+            border-radius: 11px;
+            padding: 0 14px;
+            font-family: "DM Sans", sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            color: #292521;
+            outline: none;
+            transition: .15s ease;
+        }
+
+        .pw-field textarea {
+            height: auto;
+            min-height: 70px;
+            padding: 12px 14px;
+            resize: vertical;
+        }
+
+        .pw-field input:focus,
+        .pw-field textarea:focus {
+            border-color: #b51f2c;
+            background: #fff;
+            box-shadow: 0 0 0 4px rgba(181, 31, 44, .08);
+        }
+
+        .pw-presets {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+
+        .pw-preset {
+            height: 32px;
+            padding: 0 14px;
+            border-radius: 8px;
+            border: 1.5px solid #ece5da;
+            background: #fff;
+            font-family: "DM Sans", sans-serif;
+            font-size: 11px;
+            font-weight: 800;
+            color: #6f675f;
+            cursor: pointer;
+            transition: .15s ease;
+        }
+
+        .pw-preset:hover {
+            background: #fbe8e9;
+            border-color: #f1c8cc;
+            color: #b51f2c;
+        }
+
+        .pw-preview {
+            margin-top: 14px;
+            padding: 12px 16px;
+            border-radius: 11px;
+            background: #fdfaf4;
+            border: 1px solid #f0ebe4;
+            font-size: 12px;
+            font-weight: 700;
+            color: #6f675f;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .pw-preview .to {
+            color: #1b5e20;
+            font-family: "Playfair Display", serif;
+            font-size: 16px;
+            font-weight: 700;
+        }
+
+        .pw-preview.warn .to {
+            color: #b51f2c;
+        }
+
+        .pw-info-note {
+            margin-top: 12px;
+            padding: 10px 14px;
+            border-radius: 10px;
+            background: #fff8e6;
+            border: 1.5px solid #f0dca0;
+            font-size: 11.5px;
+            color: #8a6a1e;
+            font-weight: 600;
+            display: flex;
+            gap: 8px;
+            align-items: flex-start;
+            line-height: 1.5;
+        }
+
+        .pw-info-note i {
+            color: #b8893c;
+            font-size: 14px;
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+
+        .pw-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .pw-btn {
+            flex: 1;
+            height: 46px;
+            border-radius: 11px;
+            border: none;
+            font-family: "DM Sans", sans-serif;
+            font-size: 12.5px;
+            font-weight: 800;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 7px;
+            transition: .18s ease;
+        }
+
+        .pw-btn.primary {
+            background: linear-gradient(135deg, #b51f2c 0%, #8e1722 100%);
+            color: #fff;
+            box-shadow: 0 8px 20px rgba(181, 31, 44, .22);
+        }
+
+        .pw-btn.primary:hover:not(:disabled) {
+            transform: translateY(-1px);
+        }
+
+        .pw-btn.primary:disabled {
+            opacity: .55;
+            cursor: not-allowed;
+        }
+
+        .pw-btn.ghost {
+            background: #fff;
+            border: 1.5px solid #e4ddd3;
+            color: #6f675f;
+        }
+
+        .pw-btn.ghost:hover {
+            background: #faf7f0;
+        }
+
+        .pw-history-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-top: 24px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+
+        .pw-history-head h4 {
+            margin: 0;
+            font-family: "Playfair Display", serif;
+            font-size: 14px;
+            font-weight: 700;
+            color: #302923;
+        }
+
+        .pw-history-head h4 i {
+            color: #b51f2c;
+            margin-right: 4px;
+        }
+
+        .pw-refresh {
+            height: 32px;
+            padding: 0 12px;
+            border-radius: 8px;
             border: 1.5px solid #ece5da;
             background: #fff;
             color: #6f675f;
             font-family: "DM Sans", sans-serif;
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 800;
+            cursor: pointer;
             display: inline-flex;
             align-items: center;
-            justify-content: center;
-            text-decoration: none;
-            transition: .15s ease;
+            gap: 5px;
         }
 
-        .hi-page-btn:hover:not(.active):not(.disabled) {
-            background: #fbe8e9;
-            border-color: #d98a91;
+        .pw-refresh:hover {
+            background: #faf7f0;
+            color: #302923;
+        }
+
+        .pw-history-wrap {
+            max-height: 340px;
+            overflow-y: auto;
+            border-radius: 12px;
+            border: 1.5px solid #ece5da;
+            background: #fff;
+        }
+
+        .pw-history-wrap::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .pw-history-wrap::-webkit-scrollbar-thumb {
+            background: #e0d8cd;
+            border-radius: 4px;
+        }
+
+        .pw-history-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .pw-history-table th {
+            background: #faf7f0;
+            color: #938a80;
+            font-size: 9px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: .7px;
+            padding: 10px 12px;
+            border-bottom: 1px solid #eee7dc;
+            text-align: left;
+            position: sticky;
+            top: 0;
+            z-index: 2;
+        }
+
+        .pw-history-table td {
+            padding: 11px 12px;
+            border-bottom: 1px solid #f2ede5;
+            font-size: 11.5px;
+            color: #4c4640;
+            vertical-align: middle;
+        }
+
+        .pw-history-table tr:last-child td {
+            border-bottom: 0;
+        }
+
+        .pw-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 9.5px;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+
+        .pw-badge.credit {
+            background: #e8f1e8;
+            color: #52745b;
+        }
+
+        .pw-badge.debit {
+            background: #fbeaea;
             color: #b51f2c;
         }
 
-        .hi-page-btn.active {
-            background: #b51f2c;
-            border-color: #b51f2c;
-            color: #fff;
-            box-shadow: 0 4px 10px rgba(181, 31, 44, .25);
-            cursor: default;
+        .pw-badge.pending {
+            background: #fdf1e2;
+            color: #a35a0e;
         }
 
-        .hi-page-btn.disabled {
-            opacity: .4;
-            cursor: not-allowed;
+        .pw-badge.approved {
+            background: #e8f6ea;
+            color: #1f7a3d;
+        }
+
+        .pw-badge.rejected {
+            background: #fbeaea;
+            color: #b51f2c;
+        }
+
+        .pw-amt-credit {
+            color: #1b5e20;
+            font-weight: 800;
+        }
+
+        .pw-amt-debit {
+            color: #b51f2c;
+            font-weight: 800;
+        }
+
+        .pw-bal-cell {
+            font-family: "Playfair Display", serif;
+            font-weight: 700;
+            color: #302923;
+        }
+
+        .pw-toast-wrap {
+            position: fixed;
+            top: 22px;
+            right: 22px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 10000;
             pointer-events: none;
         }
 
-        .hi-page-btn i {
-            font-size: 11px;
+        .pw-toast {
+            min-width: 260px;
+            max-width: 360px;
+            background: #fff;
+            border-radius: 12px;
+            padding: 13px 15px;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            font-size: 12px;
+            color: #302923;
+            border: 1px solid #eee7dc;
+            box-shadow: 0 14px 34px rgba(0, 0, 0, .14);
+            transform: translateX(120%);
+            opacity: 0;
+            transition: transform .3s cubic-bezier(.2, .9, .3, 1.2), opacity .3s ease;
+            pointer-events: auto;
         }
 
-        @media (max-width: 768px) {
-            .hi-page {
+        .pw-toast.show {
+            transform: translateX(0);
+            opacity: 1;
+        }
+
+        .pw-toast-icon {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            flex-shrink: 0;
+            color: #fff;
+        }
+
+        .pw-toast.success .pw-toast-icon {
+            background: #4caf50;
+        }
+
+        .pw-toast.error .pw-toast-icon {
+            background: #c62828;
+        }
+
+        .pw-toast.info .pw-toast-icon {
+            background: #3b82f6;
+        }
+
+        .pw-toast-body {
+            flex: 1;
+            padding-top: 3px;
+            line-height: 1.5;
+        }
+
+        .pw-toast-close {
+            background: transparent;
+            border: 0;
+            color: #b5aca2;
+            cursor: pointer;
+            font-size: 14px;
+            padding: 0 2px;
+            line-height: 1;
+        }
+
+        @media (max-width: 640px) {
+            .pw-page {
                 padding: 18px 14px 40px;
             }
 
-            .hi-stats {
+            .pw-card {
+                padding: 17px;
+                border-radius: 17px;
+            }
+
+            .pw-header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .pw-list-head {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .pw-search {
+                width: 100%;
+            }
+
+            .pw-grid {
                 grid-template-columns: 1fr;
             }
 
-            .hi-item {
-                flex-wrap: wrap;
+            .pw-modal {
+                padding: 20px 16px;
             }
 
-            .hi-item-right {
+            .pw-pagination {
+                flex-direction: column;
+                align-items: stretch;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .pw-toast-wrap {
+                top: 14px;
+                right: 14px;
+                left: 14px;
+            }
+
+            .pw-toast {
+                min-width: 0;
                 width: 100%;
-                text-align: left;
-                margin-top: 8px;
-            }
-
-            .hi-filters {
-                flex-direction: column;
-                align-items: stretch;
-            }
-
-            .hi-tabs {
-                justify-content: center;
-            }
-
-            .hi-pagination {
-                flex-direction: column;
-                align-items: stretch;
-            }
-
-            .hi-page-controls {
-                justify-content: center;
-                flex-wrap: wrap;
-            }
-
-            .hi-page-info {
-                text-align: center;
             }
         }
     </style>
-
 </head>
 
 <body>
@@ -766,12 +1030,10 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
             <button class="menu-toggle" id="menuToggle" aria-label="Open menu">
                 <i class="bi bi-list"></i>
             </button>
-
             <div class="tb-title">
-                <h2>My History</h2>
-                <p>All orders you've delivered</p>
+                <h2>Payment Wallet</h2>
+                <p>Request wallet updates for customers</p>
             </div>
-
             <div class="tb-actions">
                 <a href="<?= BASE_URL ?>notifications.php" class="tb-icon-btn">
                     <i class="bi bi-bell"></i>
@@ -784,215 +1046,159 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
         </header>
 
 
-        <main class="hi-page">
+        <main class="pw-page">
 
-            <div class="hi-header">
+            <div class="pw-header">
                 <div>
-                    <h1>Delivery History</h1>
-                    <p>Everything you've delivered — with totals.</p>
+                    <h1>Payment Wallet</h1>
+                    <p>Click any customer to request a wallet top-up or deduction.</p>
                 </div>
-                <span class="hi-range-label">
-                    <i class="bi bi-calendar3"></i>
-                    <?= htmlspecialchars($activeLabel) ?>
-                </span>
+                <button type="button" class="pw-btn ghost" id="pwRefresh" style="flex:0 0 auto; padding:0 20px;">
+                    <i class="bi bi-arrow-clockwise"></i> Refresh
+                </button>
             </div>
 
+            <div class="pw-card">
 
-            <form class="hi-filters" method="GET" id="hiFilterForm">
-
-                <div class="hi-tabs">
-                    <a href="?range=today" class="hi-tab <?= $range === 'today'     ? 'active' : '' ?>">Today</a>
-                    <a href="?range=yesterday" class="hi-tab <?= $range === 'yesterday' ? 'active' : '' ?>">Yesterday</a>
-                    <a href="?range=week" class="hi-tab <?= $range === 'week'      ? 'active' : '' ?>">Last 7 Days</a>
-                    <a href="?range=month" class="hi-tab <?= $range === 'month'     ? 'active' : '' ?>">This Month</a>
-                    <a href="?range=all" class="hi-tab <?= $range === 'all'       ? 'active' : '' ?>">All Time</a>
-                    <a href="#" class="hi-tab <?= $range === 'custom' ? 'active' : '' ?>" id="hiCustomTab">Custom</a>
-                </div>
-
-                <div class="hi-custom <?= $range === 'custom' ? 'show' : '' ?>" id="hiCustomBox">
-                    <input type="hidden" name="range" value="<?= $range === 'custom' ? 'custom' : '' ?>" id="hiRangeInput">
-                    <input type="date" name="from" value="<?= htmlspecialchars($from) ?>">
-                    <span>to</span>
-                    <input type="date" name="to" value="<?= htmlspecialchars($to) ?>">
-                    <button type="submit" class="hi-apply-btn">Apply</button>
-                </div>
-
-            </form>
-
-
-            <div class="hi-stats">
-
-                <div class="hi-stat">
-                    <div class="hi-stat-icon">
-                        <i class="bi bi-check-circle-fill"></i>
+                <div class="pw-list-head">
+                    <div class="pw-list-title">
+                        <h3>All Customers</h3>
+                        <span>Loaded from the database</span>
                     </div>
-                    <div class="hi-stat-label">Delivered</div>
-                    <div class="hi-stat-value green"><?= $totalDelivered ?></div>
-                    <div class="hi-stat-sub"><?= htmlspecialchars($activeLabel) ?></div>
+                    <div class="pw-search">
+                        <i class="bi bi-search"></i>
+                        <input type="text" id="pwSearch" placeholder="Search name or mobile...">
+                    </div>
                 </div>
 
-                <div class="hi-stat">
-                    <div class="hi-stat-icon blue">
-                        <i class="bi bi-hourglass-split"></i>
+                <div class="pw-grid" id="pwGrid">
+                    <div class="pw-empty">
+                        <i class="bi bi-people"></i>
+                        <h3>Loading…</h3>
+                        <p>Fetching customer list</p>
                     </div>
-                    <div class="hi-stat-label">Pending</div>
-                    <div class="hi-stat-value"><?= $totalPending ?></div>
-                    <div class="hi-stat-sub">Yet to deliver</div>
                 </div>
 
-                <div class="hi-stat">
-                    <div class="hi-stat-icon gold">
-                        <i class="bi bi-cash-coin"></i>
-                    </div>
-                    <div class="hi-stat-label">Delivered Value</div>
-                    <div class="hi-stat-value gold"><?= rupees($totalRevenue) ?></div>
-                    <div class="hi-stat-sub"><?= htmlspecialchars($activeLabel) ?></div>
-                </div>
-
-            </div>
-
-
-            <div class="hi-card">
-
-                <div class="hi-card-head">
-                    <h2 class="hi-card-title">
-                        <i class="bi bi-clock-history"></i>
-                        Delivered Orders
-                    </h2>
-                    <span class="hi-badge">
-                        <i class="bi bi-check-circle-fill"></i>
-                        <?= $totalRows ?> order<?= $totalRows === 1 ? '' : 's' ?>
-                    </span>
-                </div>
-
-                <?php if (empty($orders)): ?>
-                    <div class="hi-empty">
-                        <i class="bi bi-inbox"></i>
-                        <h3>No deliveries in this range</h3>
-                        <p>Try a different date filter.</p>
-                    </div>
-                <?php else: ?>
-                    <div class="hi-list">
-                        <?php foreach ($orders as $o):
-                            $isPickup = ($o['delivery_mode'] === 'pickup');
-                            $isIH     = (($o['address_type'] ?? '') === 'individual_house');
-
-                            $products = json_decode($o['products_json'] ?? '[]', true);
-                            $itemCount = 0;
-                            if (is_array($products)) {
-                                foreach ($products as $p) {
-                                    $itemCount += (int)($p['qty'] ?? 0);
-                                }
-                            }
-                        ?>
-                            <div class="hi-item">
-
-                                <div class="hi-item-icon">
-                                    <i class="bi bi-check-lg"></i>
-                                </div>
-
-                                <div class="hi-item-info">
-                                    <div class="hi-item-top">
-                                        <span class="hi-code">#<?= htmlspecialchars($o['order_code']) ?></span>
-                                        <span class="hi-mode <?= $isPickup ? 'pickup' : 'delivery' ?>">
-                                            <i class="bi <?= $isPickup ? 'bi-shop' : 'bi-truck' ?>"></i>
-                                            <?= $isPickup ? 'Pickup' : 'Delivery' ?>
-                                        </span>
-                                        <?php if (!$isPickup && $isIH): ?>
-                                            <span class="hi-ih-badge">
-                                                <i class="bi bi-house-door"></i> Individual House
-                                            </span>
-                                        <?php endif; ?>
-                                    </div>
-
-                                    <div class="hi-name">
-                                        <?= htmlspecialchars($o['customer_name']) ?>
-                                    </div>
-
-                                    <div class="hi-meta">
-                                        <?php if ($isPickup): ?>
-                                            <?= htmlspecialchars($o['pickup_branch_name'] ?: 'Store Pickup') ?>
-                                        <?php elseif ($isIH): ?>
-                                            <?= htmlspecialchars($o['full_address'] ?: '—') ?>
-                                        <?php else: ?>
-                                            <?= htmlspecialchars($o['apartment_name'] ?: '—') ?>
-                                            <?php if (!empty($o['division'])): ?>
-                                                · Division <?= htmlspecialchars($o['division']) ?>
-                                            <?php endif; ?>
-                                        <?php endif; ?>
-                                        · <?= $itemCount ?> item<?= $itemCount === 1 ? '' : 's' ?>
-                                    </div>
-                                </div>
-
-                                <div class="hi-item-right">
-                                    <p class="hi-amount"><?= rupees($o['total_amount']) ?></p>
-                                    <p class="hi-time">
-                                        <?= date('d M Y, h:i A', strtotime($o['updated_at'] ?: $o['created_at'])) ?>
-                                    </p>
-                                </div>
-
-                            </div>
-                        <?php endforeach; ?>
-                    </div>
-
-                    <?php if ($totalPages > 1): ?>
-                        <div class="hi-pagination">
-
-                            <div class="hi-page-info">
-                                Showing
-                                <strong><?= $offset + 1 ?></strong>–<strong><?= min($offset + $perPage, $totalRows) ?></strong>
-                                of <strong><?= $totalRows ?></strong>
-                            </div>
-
-                            <div class="hi-page-controls">
-                                <a href="<?= $page > 1 ? htmlspecialchars(pageUrl($page - 1, $qsBase)) : '#' ?>"
-                                    class="hi-page-btn <?= $page <= 1 ? 'disabled' : '' ?>"
-                                    aria-label="Previous">
-                                    <i class="bi bi-chevron-left"></i>
-                                </a>
-
-                                <?php
-                                $window = 1;
-                                $pages  = [];
-                                for ($i = 1; $i <= $totalPages; $i++) {
-                                    if (
-                                        $i === 1 || $i === $totalPages ||
-                                        ($i >= $page - $window && $i <= $page + $window)
-                                    ) {
-                                        $pages[] = $i;
-                                    }
-                                }
-
-                                $prev = 0;
-                                foreach ($pages as $p):
-                                    if ($prev && $p - $prev > 1): ?>
-                                        <span class="hi-page-btn disabled" style="border:none;background:transparent;">…</span>
-                                    <?php endif; ?>
-
-                                    <a href="<?= htmlspecialchars(pageUrl($p, $qsBase)) ?>"
-                                        class="hi-page-btn <?= $p === $page ? 'active' : '' ?>">
-                                        <?= $p ?>
-                                    </a>
-                                <?php $prev = $p;
-                                endforeach; ?>
-
-                                <a href="<?= $page < $totalPages ? htmlspecialchars(pageUrl($page + 1, $qsBase)) : '#' ?>"
-                                    class="hi-page-btn <?= $page >= $totalPages ? 'disabled' : '' ?>"
-                                    aria-label="Next">
-                                    <i class="bi bi-chevron-right"></i>
-                                </a>
-                            </div>
-
+                <div class="pw-pagination" id="pwPagination" style="display:none;">
+                    <div class="pw-pag-left">
+                        <div class="pw-pag-info" id="pwPagInfo">
+                            Showing <strong>0</strong>–<strong>0</strong> of <strong>0</strong>
                         </div>
-                    <?php endif; ?>
-
-                <?php endif; ?>
+                        <label class="pw-perpage">
+                            Show
+                            <select id="pwPerPage">
+                                <option value="12">12</option>
+                                <option value="24">24</option>
+                                <option value="48">48</option>
+                                <option value="96">96</option>
+                            </select>
+                            entries
+                        </label>
+                    </div>
+                    <div class="pw-pag-controls" id="pwPagControls"></div>
+                </div>
 
             </div>
-
         </main>
     </div>
 
+
+    <!-- ============ WALLET MODAL ============ -->
+    <div class="pw-modal-overlay" id="pwModal" aria-hidden="true">
+        <div class="pw-modal">
+            <button type="button" class="pw-modal-close" id="pwModalClose">
+                <i class="bi bi-x-lg"></i>
+            </button>
+
+            <div class="pw-modal-head">
+                <div class="pw-modal-avatar" id="pwModalAvatar">?</div>
+                <div>
+                    <h3 id="pwModalName">Customer</h3>
+                    <p id="pwModalMobile">—</p>
+                </div>
+            </div>
+
+            <div class="pw-balance-strip">
+                <div>
+                    <div class="lbl">Current Balance</div>
+                    <div class="val" id="pwModalBalance">₹0</div>
+                </div>
+                <span style="font-size:11px;color:#948c82;font-weight:700;" id="pwModalStatus">Active</span>
+            </div>
+
+            <div class="pw-tabs">
+                <button type="button" class="pw-tab credit active" data-tab="credit">
+                    <i class="bi bi-plus-circle"></i> Request Add Money
+                </button>
+                <button type="button" class="pw-tab debit" data-tab="debit">
+                    <i class="bi bi-dash-circle"></i> Request Deduct
+                </button>
+            </div>
+
+            <form id="pwForm" autocomplete="off">
+                <input type="hidden" id="pwTxnType" value="credit">
+                <input type="hidden" id="pwCustomerId" value="">
+
+                <div class="pw-field">
+                    <label>Amount (₹) <span style="color:#b51f2c;">*</span></label>
+                    <input type="number" id="pwAmount" min="1" step="0.01" required placeholder="0.00">
+                    <div class="pw-presets">
+                        <button type="button" class="pw-preset" data-amt="100">₹100</button>
+                        <button type="button" class="pw-preset" data-amt="500">₹500</button>
+                        <button type="button" class="pw-preset" data-amt="1000">₹1000</button>
+                        <button type="button" class="pw-preset" data-amt="2000">₹2000</button>
+                        <button type="button" class="pw-preset" data-amt="5000">₹5000</button>
+                    </div>
+                </div>
+
+                <div class="pw-field">
+                    <label>Note (optional)</label>
+                    <textarea id="pwNote" maxlength="250" placeholder="e.g. Cash received, order adjustment..."></textarea>
+                </div>
+
+                <div class="pw-preview" id="pwPreview">
+                    <span>New Balance will be</span>
+                    <span class="to" id="pwPreviewValue">₹0</span>
+                </div>
+
+                <div class="pw-info-note">
+                    <i class="bi bi-info-circle-fill"></i>
+                    <span>This action sends a <strong>request to admin</strong>. The balance updates only after admin approval.</span>
+                </div>
+
+                <div class="pw-actions">
+                    <button type="button" class="pw-btn ghost" id="pwCancel">Cancel</button>
+                    <button type="submit" class="pw-btn primary" id="pwSubmit">
+                        <i class="bi bi-send"></i>
+                        <span id="pwSubmitText">Send Request</span>
+                    </button>
+                </div>
+            </form>
+
+            <div class="pw-history-head">
+                <h4><i class="bi bi-clock-history"></i> Request History</h4>
+                <button type="button" class="pw-refresh" id="pwRefreshHistory">
+                    <i class="bi bi-arrow-clockwise"></i> Refresh
+                </button>
+            </div>
+
+            <div class="pw-history-wrap" id="pwHistory">
+                <div style="padding:30px;text-align:center;color:#948c82;font-size:11.5px;">
+                    Loading requests…
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+
+    <div class="pw-toast-wrap" id="pwToastWrap"></div>
+
+
+    <script>
+        window.BASE_URL = "<?= BASE_URL ?>";
+        window.ADMIN_URL = "<?= ADMIN_URL ?>";
+    </script>
 
     <script>
         (function() {
@@ -1012,25 +1218,13 @@ $activeLabel = $rangeLabels[$range] ?? 'Today';
                 overlay.classList.remove("show");
                 document.body.style.overflow = "";
             }
-
             if (toggle) toggle.addEventListener("click", openSidebar);
             if (closeBtn) closeBtn.addEventListener("click", closeSidebar);
             if (overlay) overlay.addEventListener("click", closeSidebar);
         })();
-
-        (function() {
-            var tab = document.getElementById("hiCustomTab");
-            var box = document.getElementById("hiCustomBox");
-            var rangeInput = document.getElementById("hiRangeInput");
-            if (!tab || !box) return;
-
-            tab.addEventListener("click", function(e) {
-                e.preventDefault();
-                box.classList.add("show");
-                rangeInput.value = "custom";
-            });
-        })();
     </script>
+
+    <script src="<?= BASE_URL ?>js/payment-wallet.js"></script>
 
 </body>
 

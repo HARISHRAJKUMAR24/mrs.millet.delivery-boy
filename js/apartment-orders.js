@@ -1,6 +1,7 @@
 /* =========================================================
    MRS MILL@ — APARTMENT ORDERS (delivery boy)
    File: ./js/apartment-orders.js
+   ** Updated to handle Requests **
    ========================================================= */
 
 (function () {
@@ -14,7 +15,6 @@
     const toast = document.getElementById("aoToast");
     const tabs = document.querySelectorAll(".ao-tab");
     const statusIn = document.getElementById("statusInput");
-    const dateIn = document.getElementById("dateInput");
     const filterForm = document.getElementById("filterForm");
 
     /* Details modal */
@@ -65,8 +65,6 @@
     let editingContainer = null;
     let walletCustomer = null;
     let walletActiveTab = "credit";
-
-    const DELIVERY_LOCK_SECONDS = 5 * 3600;
 
     /* ---------- Helpers ---------- */
     function showToast(msg, type) {
@@ -459,7 +457,7 @@
         document.body.style.overflow = "";
         editingContainer = null;
         containerSubmit.disabled = false;
-        containerSubmitText.textContent = "Mark Returned";
+        containerSubmitText.textContent = "Request Return"; // updated text
     }
 
     document.addEventListener("click", function (e) {
@@ -512,7 +510,7 @@
             return;
         }
 
-        containerQtyHint.textContent = "Will refund " + money(v * unitAmt) + " to wallet.";
+        containerQtyHint.textContent = "Will request refund of " + money(v * unitAmt);
         containerQtyHint.className = "hint green";
         containerRefund.textContent = money(v * unitAmt);
     }
@@ -529,7 +527,7 @@
             if (v > pending) { showToast("Cannot exceed " + pending + ".", "error"); return; }
 
             containerSubmit.disabled = true;
-            containerSubmitText.innerHTML = '<span class="btn-spinner"></span> Saving...';
+            containerSubmitText.innerHTML = '<span class="btn-spinner"></span> Sending...';
 
             const fd = new FormData();
             fd.append("customer_mobile", editingContainer.mobile);
@@ -542,27 +540,26 @@
                 .then(r => r.json().catch(() => null))
                 .then(res => {
                     containerSubmit.disabled = false;
-                    containerSubmitText.textContent = "Mark Returned";
+                    containerSubmitText.textContent = "Request Return";
 
                     if (!res || !res.success) {
                         showToast((res && res.message) || "Failed.", "error");
                         return;
                     }
 
-                    showToast(res.message || "Container returned.");
+                    showToast(res.message || "Request sent.");
                     closeContainerModal();
-                    setTimeout(() => location.reload(), 600);
                 })
                 .catch(() => {
                     containerSubmit.disabled = false;
-                    containerSubmitText.textContent = "Mark Returned";
+                    containerSubmitText.textContent = "Request Return";
                     showToast("Unable to connect.", "error");
                 });
         });
     }
 
     /* =====================================================
-       WALLET MODAL — same as payment wallet page
+       WALLET MODAL
        ===================================================== */
     function openWalletModal(mobile, name) {
         if (!mobile) return;
@@ -607,7 +604,7 @@
         document.body.style.overflow = "";
         walletCustomer = null;
         walletSubmit.disabled = false;
-        walletSubmitText.textContent = "Add Money";
+        walletSubmitText.textContent = "Send Request"; // updated
     }
 
     function loadWalletCustomer(mobile) {
@@ -643,7 +640,7 @@
         walletActiveTab = tab;
         walletTxnType.value = tab;
         walletTabs.forEach(t => t.classList.toggle("active", t.dataset.wtab === tab));
-        walletSubmitText.textContent = tab === "credit" ? "Add Money" : "Deduct Money";
+        walletSubmitText.textContent = tab === "credit" ? "Request Add Money" : "Request Deduct";
         updateWalletPreview();
     }
 
@@ -693,7 +690,7 @@
         }
 
         walletSubmit.disabled = true;
-        walletSubmitText.innerHTML = '<span class="btn-spinner"></span> Saving…';
+        walletSubmitText.innerHTML = '<span class="btn-spinner"></span> Sending…';
 
         const fd = new FormData();
         fd.append("customer_id", walletCustomer.id);
@@ -707,28 +704,22 @@
             .then(r => r.json().catch(() => null))
             .then(res => {
                 walletSubmit.disabled = false;
-                walletSubmitText.textContent = walletActiveTab === "credit" ? "Add Money" : "Deduct Money";
+                walletSubmitText.textContent = walletActiveTab === "credit" ? "Request Add Money" : "Request Deduct";
 
                 if (!res || !res.success) {
                     showToast((res && res.message) || "Failed.", "error");
                     return;
                 }
 
-                showToast(res.message || "Wallet updated.");
-
-                if (res.data && typeof res.data.balance_after !== "undefined") {
-                    walletCustomer.wallet_balance = Number(res.data.balance_after);
-                    walletBalanceEl.textContent = money(walletCustomer.wallet_balance);
-                }
-
+                showToast(res.message || "Request sent.");
+                
                 walletAmount.value = "";
                 walletNote.value = "";
                 updateWalletPreview();
-                loadWalletHistory(walletCustomer.mobile);
             })
             .catch(() => {
                 walletSubmit.disabled = false;
-                walletSubmitText.textContent = walletActiveTab === "credit" ? "Add Money" : "Deduct Money";
+                walletSubmitText.textContent = walletActiveTab === "credit" ? "Request Add Money" : "Request Deduct";
                 showToast("Unable to connect.", "error");
             });
     }

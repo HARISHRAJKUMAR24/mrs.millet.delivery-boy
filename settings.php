@@ -38,7 +38,7 @@ $firstName = explode(' ', trim($boy['full_name']))[0];
 
     <style>
         /* =====================================================
-           SETTINGS PAGE
+           SETTINGS PAGE (READ-ONLY)
         ===================================================== */
         .st-page {
             padding: 24px 26px 40px;
@@ -90,7 +90,7 @@ $firstName = explode(' ', trim($boy['full_name']))[0];
             border-bottom: 1px solid #f0ebe4;
         }
 
-        .st-card-title>i {
+        .st-card-title > i {
             width: 34px;
             height: 34px;
             border-radius: 10px;
@@ -118,126 +118,80 @@ $firstName = explode(' ', trim($boy['full_name']))[0];
             margin-top: 2px;
         }
 
-        /* Form fields */
-        .st-field {
-            margin-bottom: 14px;
+        /* Read-only field row */
+        .st-ro-field {
+            padding: 12px 14px;
+            border: 1.5px dashed #ece5da;
+            background: #fdfaf4;
+            border-radius: 11px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
         }
 
-        .st-field:last-child {
+        .st-ro-field:last-child {
             margin-bottom: 0;
         }
 
-        .st-field label {
-            display: block;
-            font-size: 11px;
-            font-weight: 700;
-            color: #4e4841;
-            margin-bottom: 6px;
-        }
-
-        .st-field label .required {
-            color: #b51f2c;
-        }
-
-        .st-input-wrap {
-            position: relative;
-        }
-
-        .st-input-wrap>i.lead {
-            position: absolute;
-            left: 14px;
-            top: 50%;
-            transform: translateY(-50%);
-            color: #b0a79c;
-            font-size: 15px;
-            pointer-events: none;
-        }
-
-        .st-input {
-            width: 100%;
-            height: 44px;
-            border: 1.5px solid #ece5da;
-            background: #fffdf9;
-            border-radius: 11px;
-            padding: 0 14px 0 40px;
-            font-family: "DM Sans", sans-serif;
-            font-size: 12.5px;
-            color: #292521;
-            outline: none;
-            transition: .2s ease;
-        }
-
-        .st-input:focus {
-            border-color: #b51f2c;
-            background: #fff;
-            box-shadow: 0 0 0 4px rgba(181, 31, 44, .08);
-        }
-
-        .st-input[readonly] {
-            background: #f4efe8;
-            color: #6f5a3f;
-            cursor: not-allowed;
-            border-style: dashed;
-        }
-
-        .st-eye-btn {
-            position: absolute;
-            right: 8px;
-            top: 50%;
-            transform: translateY(-50%);
-            width: 34px;
-            height: 34px;
-            border: 0;
-            background: transparent;
-            color: #b0a79c;
-            border-radius: 8px;
-            cursor: pointer;
-            display: inline-flex;
+        .st-ro-left {
+            display: flex;
             align-items: center;
-            justify-content: center;
-            font-size: 15px;
-            transition: .15s;
+            gap: 10px;
+            min-width: 0;
+            flex: 1;
         }
 
-        .st-eye-btn:hover {
+        .st-ro-left > i {
             color: #b51f2c;
-            background: #fbe8e9;
+            font-size: 15px;
+            flex-shrink: 0;
         }
 
-        .st-input.has-eye {
-            padding-right: 46px;
+        .st-ro-label {
+            font-size: 10.5px;
+            font-weight: 800;
+            color: #948c82;
+            text-transform: uppercase;
+            letter-spacing: .05em;
+            margin-bottom: 2px;
         }
 
-        /* Save button */
-        .st-save-btn {
-            width: 100%;
-            height: 46px;
-            border: none;
-            background: linear-gradient(135deg, #b51f2c 0%, #8e1722 100%);
-            color: #fff;
-            border-radius: 11px;
-            font-family: "DM Sans", sans-serif;
-            font-size: 12.5px;
+        .st-ro-value {
+            font-size: 13px;
             font-weight: 700;
-            letter-spacing: .3px;
-            cursor: pointer;
-            transition: .2s ease;
-            box-shadow: 0 8px 20px rgba(181, 31, 44, .22);
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            margin-top: 6px;
+            color: #302923;
+            word-break: break-word;
         }
 
-        .st-save-btn:hover:not(:disabled) {
-            transform: translateY(-1px);
-            box-shadow: 0 12px 26px rgba(181, 31, 44, .3);
+        .st-ro-value.empty {
+            color: #a19a90;
+            font-weight: 500;
+            font-style: italic;
         }
 
-        .st-save-btn:disabled {
-            opacity: .7;
-            cursor: not-allowed;
+        /* Info notice */
+        .st-notice {
+            margin-top: 16px;
+            padding: 12px 14px;
+            border-radius: 11px;
+            background: #fff8e6;
+            border: 1.5px solid #f0dca0;
+            font-size: 11.5px;
+            color: #8a6a1e;
+            font-weight: 600;
+            display: flex;
+            gap: 9px;
+            align-items: flex-start;
+            line-height: 1.5;
+        }
+
+        .st-notice i {
+            color: #b8893c;
+            font-size: 14px;
+            flex-shrink: 0;
+            margin-top: 1px;
         }
 
         /* Profile side */
@@ -309,6 +263,7 @@ $firstName = explode(' ', trim($boy['full_name']))[0];
         .st-profile-meta-row strong {
             color: #302923;
             font-weight: 700;
+            text-align: right;
         }
 
         .st-status-pill {
@@ -328,37 +283,6 @@ $firstName = explode(' ', trim($boy['full_name']))[0];
         .st-status-pill.inactive {
             background: #fdeaea;
             color: #b51f2c;
-        }
-
-        /* Toast */
-        #mmToast {
-            position: fixed;
-            bottom: 26px;
-            left: 50%;
-            transform: translateX(-50%) translateY(20px);
-            padding: 12px 22px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 700;
-            font-family: "DM Sans", sans-serif;
-            color: #fff;
-            background: #2e7d32;
-            box-shadow: 0 15px 40px rgba(0, 0, 0, .25);
-            z-index: 99999;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity .25s ease, transform .25s ease;
-            max-width: 90vw;
-            text-align: center;
-        }
-
-        #mmToast.show {
-            opacity: 1;
-            transform: translateX(-50%) translateY(0);
-        }
-
-        #mmToast.error {
-            background: #b51f2c;
         }
 
         /* Responsive */
@@ -398,7 +322,7 @@ $firstName = explode(' ', trim($boy['full_name']))[0];
 
             <div class="tb-title">
                 <h2>Settings</h2>
-                <p>Manage your profile and password</p>
+                <p>Your profile information</p>
             </div>
 
             <div class="tb-actions">
@@ -417,142 +341,73 @@ $firstName = explode(' ', trim($boy['full_name']))[0];
 
             <div class="st-head">
                 <h1>Settings</h1>
-                <p>Update your name, email, mobile and password.</p>
+                <p>Your account details are managed by the admin.</p>
             </div>
 
 
             <div class="st-layout">
 
-                <!-- LEFT: FORMS -->
+                <!-- LEFT: READ-ONLY INFO -->
                 <div>
 
-                    <!-- PROFILE -->
+                    <!-- PERSONAL INFO -->
                     <div class="st-card">
                         <div class="st-card-title">
                             <i class="bi bi-person-circle"></i>
                             <div>
-                                <h3>Profile Details</h3>
-                                <span>Update your basic information</span>
+                                <h3>Personal Information</h3>
+                                <span>Managed by admin</span>
                             </div>
                         </div>
 
-                        <form id="profileForm" novalidate>
-
-                            <div class="st-field">
-                                <label>Full Name <span class="required">*</span></label>
-                                <div class="st-input-wrap">
-                                    <i class="bi bi-person lead"></i>
-                                    <input type="text"
-                                        id="st_full_name"
-                                        class="st-input"
-                                        value="<?= htmlspecialchars($boy['full_name']) ?>"
-                                        maxlength="150"
-                                        required>
+                        <div class="st-ro-field">
+                            <div class="st-ro-left">
+                                <i class="bi bi-person"></i>
+                                <div>
+                                    <div class="st-ro-label">Full Name</div>
+                                    <div class="st-ro-value"><?= htmlspecialchars($boy['full_name']) ?></div>
                                 </div>
-                            </div>
-
-                            <div class="st-field">
-                                <label>Mobile Number <span class="required">*</span></label>
-                                <div class="st-input-wrap">
-                                    <i class="bi bi-phone lead"></i>
-                                    <input type="text"
-                                        id="st_mobile"
-                                        class="st-input"
-                                        value="<?= htmlspecialchars($boy['mobile_number']) ?>"
-                                        maxlength="15"
-                                        inputmode="numeric"
-                                        required>
-                                </div>
-                            </div>
-
-                            <div class="st-field">
-                                <label>Email Address</label>
-                                <div class="st-input-wrap">
-                                    <i class="bi bi-envelope lead"></i>
-                                    <input type="email"
-                                        id="st_email"
-                                        class="st-input"
-                                        value="<?= htmlspecialchars($boy['email_address'] ?? '') ?>"
-                                        maxlength="190"
-                                        placeholder="(optional)">
-                                </div>
-                            </div>
-
-                            <button type="submit" class="st-save-btn" id="saveProfileBtn">
-                                <i class="bi bi-check-lg"></i>
-                                <span id="saveProfileText">Save Profile</span>
-                            </button>
-
-                        </form>
-                    </div>
-
-
-                    <!-- PASSWORD -->
-                    <div class="st-card">
-                        <div class="st-card-title">
-                            <i class="bi bi-shield-lock"></i>
-                            <div>
-                                <h3>Change Password</h3>
-                                <span>Minimum 6 characters</span>
                             </div>
                         </div>
 
-                        <form id="passwordForm" novalidate>
-
-                            <div class="st-field">
-                                <label>Current Password <span class="required">*</span></label>
-                                <div class="st-input-wrap">
-                                    <i class="bi bi-lock lead"></i>
-                                    <input type="password"
-                                        id="st_current_password"
-                                        class="st-input has-eye"
-                                        placeholder="Enter current password"
-                                        maxlength="100"
-                                        autocomplete="current-password">
-                                    <button type="button" class="st-eye-btn" data-toggle="st_current_password">
-                                        <i class="bi bi-eye"></i>
-                                    </button>
+                        <div class="st-ro-field">
+                            <div class="st-ro-left">
+                                <i class="bi bi-phone"></i>
+                                <div>
+                                    <div class="st-ro-label">Mobile Number</div>
+                                    <div class="st-ro-value"><?= htmlspecialchars($boy['mobile_number']) ?></div>
                                 </div>
                             </div>
+                        </div>
 
-                            <div class="st-field">
-                                <label>New Password <span class="required">*</span></label>
-                                <div class="st-input-wrap">
-                                    <i class="bi bi-lock-fill lead"></i>
-                                    <input type="password"
-                                        id="st_new_password"
-                                        class="st-input has-eye"
-                                        placeholder="Enter new password (min 6 chars)"
-                                        maxlength="100"
-                                        autocomplete="new-password">
-                                    <button type="button" class="st-eye-btn" data-toggle="st_new_password">
-                                        <i class="bi bi-eye"></i>
-                                    </button>
+                        <div class="st-ro-field">
+                            <div class="st-ro-left">
+                                <i class="bi bi-envelope"></i>
+                                <div>
+                                    <div class="st-ro-label">Email Address</div>
+                                    <?php if (!empty($boy['email_address'])): ?>
+                                        <div class="st-ro-value"><?= htmlspecialchars($boy['email_address']) ?></div>
+                                    <?php else: ?>
+                                        <div class="st-ro-value empty">Not provided</div>
+                                    <?php endif; ?>
                                 </div>
                             </div>
+                        </div>
 
-                            <div class="st-field">
-                                <label>Confirm New Password <span class="required">*</span></label>
-                                <div class="st-input-wrap">
-                                    <i class="bi bi-lock-fill lead"></i>
-                                    <input type="password"
-                                        id="st_confirm_password"
-                                        class="st-input has-eye"
-                                        placeholder="Re-enter new password"
-                                        maxlength="100"
-                                        autocomplete="new-password">
-                                    <button type="button" class="st-eye-btn" data-toggle="st_confirm_password">
-                                        <i class="bi bi-eye"></i>
-                                    </button>
+                        <div class="st-ro-field">
+                            <div class="st-ro-left">
+                                <i class="bi bi-upc-scan"></i>
+                                <div>
+                                    <div class="st-ro-label">Delivery Code</div>
+                                    <div class="st-ro-value">#<?= htmlspecialchars($boy['delivery_code']) ?></div>
                                 </div>
                             </div>
+                        </div>
 
-                            <button type="submit" class="st-save-btn" id="savePasswordBtn">
-                                <i class="bi bi-shield-check"></i>
-                                <span id="savePasswordText">Update Password</span>
-                            </button>
-
-                        </form>
+                        <div class="st-notice">
+                            <i class="bi bi-info-circle-fill"></i>
+                            <span>If you need to update your details, please contact the admin.</span>
+                        </div>
                     </div>
 
                 </div>
@@ -638,8 +493,6 @@ $firstName = explode(' ', trim($boy['full_name']))[0];
             if (overlay) overlay.addEventListener("click", closeSidebar);
         })();
     </script>
-
-    <script src="<?= BASE_URL ?>js/settings.js"></script>
 
 </body>
 

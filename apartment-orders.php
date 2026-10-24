@@ -55,9 +55,8 @@ if (!in_array($statusFilter, $allowedStatus, true)) $statusFilter = 'pending';
 
 /* =========================================================
    ORDERS
-   - customer_name / customer_mobile → customers table
-   - apartment_name / division_label → orders.address_json
-   - customer_id (orders) = MRSMCxxxxx (varchar)
+   - Uses CURDATE() to ensure today's pending only shows today's orders
+   - Tomorrow's orders are hidden until their date arrives
    ========================================================= */
 $orders = [];
 try {
@@ -88,13 +87,20 @@ try {
 
     $params = [$aptCode, $boyId];
 
+    // Logic to filter by TODAY
     if ($statusFilter === 'pending') {
-        $sql .= " AND o.delivery_status = 'disabled'";
+        // ONLY show orders placed TODAY that are still pending
+        $sql .= " AND o.delivery_status = 'disabled' AND DATE(o.created_at) = CURDATE()";
     } elseif ($statusFilter === 'delivered') {
-        $sql .= " AND o.delivery_status = 'enabled'";
+        // Show orders delivered TODAY (based on when it was delivered/updated)
+        $sql .= " AND o.delivery_status = 'enabled' AND DATE(o.updated_at) = CURDATE()";
+    } else {
+        // "All" tab -> only show orders created today
+        $sql .= " AND DATE(o.created_at) = CURDATE()";
     }
 
     if ($dateFilter !== '') {
+        // If user picks a specific date, override the default today filter
         $sql .= " AND DATE(o.created_at) = ?";
         $params[] = $dateFilter;
     }
@@ -124,8 +130,7 @@ try {
 
 /* =========================================================
    CONTAINER SUMMARY (per customer, this apartment, this boy)
-   Use customer_id for grouping (customers.id) via oc.customer_id
-   Fall back to customer_id from orders
+   Only includes orders placed today
    ========================================================= */
 $containerSummary = [];
 try {
@@ -148,6 +153,7 @@ try {
            AND JSON_UNQUOTE(JSON_EXTRACT(o.address_json, '$.apartment_code')) = ?
            AND o.delivery_boy_id = ?
            AND o.status <> 'cancelled'
+           AND DATE(o.created_at) = CURDATE()
          GROUP BY customer_row_id, c.full_name, c.mobile_number
          HAVING SUM(oc.total_containers - oc.received_containers) > 0"
     );

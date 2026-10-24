@@ -1,6 +1,7 @@
 /* =========================================================
    MRS MILL@ — PAYMENT WALLET (delivery boy)
    File: ./js/payment-wallet.js
+   Sends wallet requests to admin for approval
    ========================================================= */
 
 (function () {
@@ -106,35 +107,20 @@
         setTimeout(close, timeout || 3200);
     }
 
-    /* =========================================
-       RENDER CARD (with apartment + division)
-       ========================================= */
+    /* RENDER CARD */
     function renderCard(c) {
         const wallet = Number(c.wallet_balance) || 0;
         const walletClass = wallet > 0 ? "" : "zero";
-
         const aptName = (c.apartment_name || "").trim();
         const divName = (c.division || "").trim();
 
         const aptLine = aptName
-            ? `<div class="pw-address-row">
-                   <i class="bi bi-building"></i>
-                   <span><span class="lbl">Apartment:</span> ${esc(aptName)}</span>
-               </div>`
-            : `<div class="pw-address-row" style="color:#948c82;">
-                   <i class="bi bi-building" style="color:#d5cbbd;"></i>
-                   <span>No apartment assigned</span>
-               </div>`;
+            ? `<div class="pw-address-row"><i class="bi bi-building"></i><span><span class="lbl">Apartment:</span> ${esc(aptName)}</span></div>`
+            : `<div class="pw-address-row" style="color:#948c82;"><i class="bi bi-building" style="color:#d5cbbd;"></i><span>No apartment assigned</span></div>`;
 
         const divLine = divName
-            ? `<div class="pw-address-row">
-                   <i class="bi bi-grid-3x3-gap"></i>
-                   <span><span class="lbl">Division:</span> ${esc(divName)}</span>
-               </div>`
-            : `<div class="pw-address-row" style="color:#948c82;">
-                   <i class="bi bi-grid-3x3-gap" style="color:#d5cbbd;"></i>
-                   <span>No division</span>
-               </div>`;
+            ? `<div class="pw-address-row"><i class="bi bi-grid-3x3-gap"></i><span><span class="lbl">Division:</span> ${esc(divName)}</span></div>`
+            : `<div class="pw-address-row" style="color:#948c82;"><i class="bi bi-grid-3x3-gap" style="color:#d5cbbd;"></i><span>No division</span></div>`;
 
         return `
             <div class="pw-cust" data-id="${c.id}">
@@ -145,12 +131,10 @@
                         <div class="pw-cust-mobile">${esc(c.mobile_number)}</div>
                     </div>
                 </div>
-
                 <div class="pw-address">
                     ${aptLine}
                     ${divLine}
                 </div>
-
                 <div class="pw-cust-foot">
                     <span class="pw-wallet ${walletClass}">
                         <i class="bi bi-wallet2"></i> ${money(wallet)}
@@ -163,9 +147,6 @@
         `;
     }
 
-    /* =========================================
-       RENDER PAGE
-       ========================================= */
     function renderPage() {
         const total = filtered.length;
 
@@ -240,9 +221,6 @@
         renderPage();
     });
 
-    /* =========================================
-       FILTER
-       ========================================= */
     function applyFilter(resetPage) {
         const q = (searchTerm || "").trim().toLowerCase();
 
@@ -254,10 +232,8 @@
                 const mob  = (c.mobile_number || "").toLowerCase();
                 const apt  = (c.apartment_name || "").toLowerCase();
                 const div  = (c.division || "").toLowerCase();
-                return name.indexOf(q) !== -1 ||
-                       mob.indexOf(q) !== -1 ||
-                       apt.indexOf(q) !== -1 ||
-                       div.indexOf(q) !== -1;
+                return name.indexOf(q) !== -1 || mob.indexOf(q) !== -1 ||
+                       apt.indexOf(q) !== -1 || div.indexOf(q) !== -1;
             });
         }
 
@@ -285,9 +261,6 @@
         });
     }
 
-    /* =========================================
-       LOAD CUSTOMERS
-       ========================================= */
     function loadCustomers() {
         grid.innerHTML = `
             <div class="pw-empty">
@@ -310,7 +283,6 @@
                         </div>`;
                     return;
                 }
-
                 allCustomers = res.data;
                 applyFilter(true);
             })
@@ -331,9 +303,6 @@
         loadCustomers();
     });
 
-    /* =========================================
-       CLICK CUSTOMER → OPEN MODAL
-       ========================================= */
     grid?.addEventListener("click", (e) => {
         const card = e.target.closest(".pw-cust");
         if (!card) return;
@@ -343,9 +312,6 @@
         openModal(customer);
     });
 
-    /* =========================================
-       MODAL
-       ========================================= */
     function openModal(customer) {
         activeCustomer = customer;
 
@@ -356,7 +322,6 @@
         modalBalance.textContent = money(customer.wallet_balance);
         modalStatus.textContent = Number(customer.status) === 1 ? "Active" : "Inactive";
 
-        /* Reset */
         setTab("credit");
         amountInput.value = "";
         noteInput.value = "";
@@ -376,6 +341,7 @@
         document.body.style.overflow = "";
         activeCustomer = null;
         submitBtn.disabled = false;
+        submitText.textContent = "Send Request";
     }
 
     modalClose?.addEventListener("click", closeModal);
@@ -387,12 +353,11 @@
         if (e.key === "Escape" && modal.classList.contains("show")) closeModal();
     });
 
-    /* Tabs */
     function setTab(tab) {
         activeTab = tab;
         txnTypeInput.value = tab;
         tabs.forEach(t => t.classList.toggle("active", t.dataset.tab === tab));
-        submitText.textContent = tab === "credit" ? "Add Money" : "Deduct Money";
+        submitText.textContent = "Send Request";
         updatePreview();
     }
 
@@ -400,7 +365,6 @@
         t.addEventListener("click", () => setTab(t.dataset.tab));
     });
 
-    /* Presets */
     presets.forEach(p => {
         p.addEventListener("click", () => {
             amountInput.value = p.dataset.amt;
@@ -408,7 +372,6 @@
         });
     });
 
-    /* Preview */
     amountInput?.addEventListener("input", updatePreview);
 
     function updatePreview() {
@@ -431,7 +394,7 @@
     }
 
     /* =========================================
-       SUBMIT WALLET UPDATE
+       SUBMIT → sends REQUEST to admin
        ========================================= */
     form?.addEventListener("submit", (e) => {
         e.preventDefault();
@@ -455,7 +418,7 @@
         }
 
         submitBtn.disabled = true;
-        submitText.innerHTML = '<span class="bi bi-hourglass-split"></span> Processing…';
+        submitText.innerHTML = '<span class="bi bi-hourglass-split"></span> Sending…';
 
         const fd = new FormData();
         fd.append("customer_id", activeCustomer.id);
@@ -463,6 +426,7 @@
         fd.append("amount", amt);
         fd.append("note", note);
 
+        // Uses the SAME endpoint — but now it inserts into delivery_boy_requests
         fetch(BASE_URL + "ajax/wallet-update.php", {
             method: "POST",
             body: fd,
@@ -471,25 +435,14 @@
             .then(r => r.json().catch(() => null))
             .then(res => {
                 submitBtn.disabled = false;
-                submitText.textContent = activeTab === "credit" ? "Add Money" : "Deduct Money";
+                submitText.textContent = "Send Request";
 
                 if (!res || !res.success) {
-                    showToast("error", (res && res.message) || "Failed to update wallet.");
+                    showToast("error", (res && res.message) || "Failed to send request.");
                     return;
                 }
 
-                showToast("success", res.message || "Wallet updated.");
-
-                /* Update local customer object */
-                if (res.data && typeof res.data.balance_after !== "undefined") {
-                    activeCustomer.wallet_balance = Number(res.data.balance_after);
-                    modalBalance.textContent = money(res.data.balance_after);
-                }
-
-                /* Update card in list */
-                const c = allCustomers.find(x => String(x.id) === String(activeCustomer.id));
-                if (c) c.wallet_balance = activeCustomer.wallet_balance;
-                renderPage();
+                showToast("success", res.message || "Request sent to admin.");
 
                 amountInput.value = "";
                 noteInput.value = "";
@@ -498,13 +451,13 @@
             })
             .catch(() => {
                 submitBtn.disabled = false;
-                submitText.textContent = activeTab === "credit" ? "Add Money" : "Deduct Money";
+                submitText.textContent = "Send Request";
                 showToast("error", "Unable to connect.");
             });
     });
 
     /* =========================================
-       HISTORY
+       HISTORY (shows requests + actual wallet txn history)
        ========================================= */
     refreshHistory?.addEventListener("click", () => {
         if (activeCustomer) loadHistory(activeCustomer.id);
@@ -514,7 +467,7 @@
         if (!historyWrap) return;
         historyWrap.innerHTML = `
             <div style="padding:30px;text-align:center;color:#948c82;font-size:11.5px;">
-                Loading transactions…
+                Loading requests…
             </div>`;
 
         fetch(BASE_URL + "ajax/wallet-history.php?customer_id=" + encodeURIComponent(customerId), {
@@ -530,55 +483,115 @@
                     return;
                 }
 
-                const rows = Array.isArray(res.data) ? res.data : (res.data.transactions || []);
+                const requests = Array.isArray(res.data) ? res.data : (res.data.requests || []);
+                const txns     = res.data && Array.isArray(res.data.transactions) ? res.data.transactions : [];
 
-                if (!rows.length) {
+                if (!requests.length && !txns.length) {
                     historyWrap.innerHTML = `
                         <div style="padding:40px 20px;text-align:center;color:#948c82;font-size:11.5px;">
-                            No transactions yet.
+                            No requests or transactions yet.
                         </div>`;
                     return;
                 }
 
-                historyWrap.innerHTML = `
-                    <table class="pw-history-table">
-                        <thead>
-                            <tr>
-                                <th>Date</th>
-                                <th>Type</th>
-                                <th>Amount</th>
-                                <th>Balance</th>
-                                <th>Note</th>
-                                <th>By</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${rows.map(t => {
-                                const isCredit = t.txn_type === "credit";
-                                return `
-                                    <tr>
-                                        <td>
-                                            <div style="font-weight:700;color:#302923;">${esc(fmtDate(t.created_at))}</div>
-                                            <div style="font-size:9.5px;color:#948c82;margin-top:2px;">${esc(t.txn_code || "")}</div>
-                                        </td>
-                                        <td>
-                                            <span class="pw-badge ${isCredit ? 'credit' : 'debit'}">
-                                                <i class="bi bi-${isCredit ? 'arrow-down' : 'arrow-up'}"></i>
-                                                ${isCredit ? 'Credit' : 'Debit'}
-                                            </span>
-                                        </td>
-                                        <td class="${isCredit ? 'pw-amt-credit' : 'pw-amt-debit'}">
-                                            ${isCredit ? '+' : '−'} ${money(t.amount)}
-                                        </td>
-                                        <td class="pw-bal-cell">${money(t.balance_after)}</td>
-                                        <td>${esc(t.note || "—")}</td>
-                                        <td>${esc(t.created_by_name || "—")}</td>
-                                    </tr>
-                                `;
-                            }).join("")}
-                        </tbody>
-                    </table>
-                `;
+                let html = '';
+
+                // Show pending/approved requests first
+                if (requests.length) {
+                    html += `
+                        <div style="padding:10px 14px;background:#faf7f0;font-size:10px;font-weight:800;color:#6f675f;letter-spacing:.06em;text-transform:uppercase;border-bottom:1px solid #eee7dc;">
+                            My Requests
+                        </div>
+                        <table class="pw-history-table">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Type</th>
+                                    <th>Amount</th>
+                                    <th>Status</th>
+                                    <th>Note</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${requests.map(r => {
+                                    const isCredit = r.request_type === "wallet_credit";
+                                    const statusMap = {
+                                        pending: { cls: "pending", label: "Pending" },
+                                        approved: { cls: "approved", label: "Approved" },
+                                        rejected: { cls: "rejected", label: "Rejected" }
+                                    };
+                                    const st = statusMap[r.status] || statusMap.pending;
+                                    return `
+                                        <tr>
+                                            <td>
+                                                <div style="font-weight:700;color:#302923;">${esc(fmtDate(r.created_at))}</div>
+                                            </td>
+                                            <td>
+                                                <span class="pw-badge ${isCredit ? 'credit' : 'debit'}">
+                                                    ${isCredit ? 'Credit' : 'Debit'}
+                                                </span>
+                                            </td>
+                                            <td class="${isCredit ? 'pw-amt-credit' : 'pw-amt-debit'}">
+                                                ${isCredit ? '+' : '−'} ${money(r.amount)}
+                                            </td>
+                                            <td>
+                                                <span class="pw-badge ${st.cls}">${st.label}</span>
+                                            </td>
+                                            <td>${esc(r.note || "—")}</td>
+                                        </tr>
+                                    `;
+                                }).join("")}
+                            </tbody>
+                        </table>
+                    `;
+                }
+
+                // Then show approved transaction history
+                if (txns.length) {
+                    html += `
+                        <div style="padding:10px 14px;background:#faf7f0;font-size:10px;font-weight:800;color:#6f675f;letter-spacing:.06em;text-transform:uppercase;border-top:1px solid #eee7dc;border-bottom:1px solid #eee7dc;">
+                            Balance History
+                        </div>
+                        <table class="pw-history-table">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Type</th>
+                                    <th>Amount</th>
+                                    <th>Balance</th>
+                                    <th>Note</th>
+                                    <th>By</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${txns.map(t => {
+                                    const isCredit = t.txn_type === "credit";
+                                    return `
+                                        <tr>
+                                            <td>
+                                                <div style="font-weight:700;color:#302923;">${esc(fmtDate(t.created_at))}</div>
+                                                <div style="font-size:9.5px;color:#948c82;margin-top:2px;">${esc(t.txn_code || "")}</div>
+                                            </td>
+                                            <td>
+                                                <span class="pw-badge ${isCredit ? 'credit' : 'debit'}">
+                                                    ${isCredit ? 'Credit' : 'Debit'}
+                                                </span>
+                                            </td>
+                                            <td class="${isCredit ? 'pw-amt-credit' : 'pw-amt-debit'}">
+                                                ${isCredit ? '+' : '−'} ${money(t.amount)}
+                                            </td>
+                                            <td class="pw-bal-cell">${money(t.balance_after)}</td>
+                                            <td>${esc(t.note || "—")}</td>
+                                            <td>${esc(t.created_by_name || "—")}</td>
+                                        </tr>
+                                    `;
+                                }).join("")}
+                            </tbody>
+                        </table>
+                    `;
+                }
+
+                historyWrap.innerHTML = html;
             })
             .catch(() => {
                 historyWrap.innerHTML = `
@@ -588,9 +601,6 @@
             });
     }
 
-    /* =========================================
-       INIT
-       ========================================= */
     loadCustomers();
 
 })();
