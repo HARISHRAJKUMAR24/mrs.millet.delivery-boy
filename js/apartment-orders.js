@@ -243,93 +243,116 @@
             : '';
 
         amBody.innerHTML = `
-            <div class="ao-modal-section">
-                <h4 class="ao-modal-title"><i class="bi bi-person-badge-fill"></i> Customer</h4>
-                <div class="ao-info-list">
-                    <div class="ao-info-row">
-                        <span class="lbl">Name</span>
-                        <span class="val">${esc(o.customer_name)}</span>
-                    </div>
-                    <div class="ao-info-row">
-                        <span class="lbl">Mobile</span>
-                        <span class="val">
-                            <a class="ao-call" href="tel:${esc(mobileClean)}">
-                                <i class="bi bi-telephone-fill"></i> ${esc(o.customer_mobile)}
-                            </a>
-                        </span>
-                    </div>
-                </div>
+    <div class="ao-modal-section">
+        <h4 class="ao-modal-title"><i class="bi bi-person-badge-fill"></i> Customer</h4>
+        <div class="ao-info-list">
+            <div class="ao-info-row">
+                <span class="lbl">Name</span>
+                <span class="val">${esc(o.customer_name)}</span>
             </div>
-
-            <div class="ao-modal-section">
-                <h4 class="ao-modal-title"><i class="bi bi-geo-alt-fill"></i> Delivery Address</h4>
-                <div class="ao-info-list">
-                    <div class="ao-info-row">
-                        <span class="lbl">Apartment</span>
-                        <span class="val">${esc(o.apartment_name || '—')}</span>
-                    </div>
-                    <div class="ao-info-row">
-                        <span class="lbl">Code</span>
-                        <span class="val">${esc(o.apartment_code || '—')}</span>
-                    </div>
-                    <div class="ao-info-row">
-                        <span class="lbl">Division</span>
-                        <span class="val">${esc(o.division || '—')}</span>
-                    </div>
-                </div>
+            <div class="ao-info-row">
+                <span class="lbl">Mobile</span>
+                <span class="val">
+                    <a class="ao-call" href="tel:${esc(mobileClean)}">
+                        <i class="bi bi-telephone-fill"></i> ${esc(o.customer_mobile)}
+                    </a>
+                </span>
             </div>
+        </div>
+    </div>
 
-            <div class="ao-modal-section">
-                <h4 class="ao-modal-title"><i class="bi bi-basket3-fill"></i> Items</h4>
-                <div class="ao-products">
-                    ${productsHtml || '<div style="padding:14px;text-align:center;color:#948c82;font-size:12px;">No items</div>'}
-                </div>
+    <div class="ao-modal-section">
+        <h4 class="ao-modal-title"><i class="bi bi-geo-alt-fill"></i> Address & Location</h4>
+        <div class="ao-info-list">
+            <div class="ao-info-row" style="flex-direction:column;align-items:flex-start;gap:6px;">
+                <span class="lbl">Full Address</span>
+                <span class="val" style="text-align:left;font-weight:600;">${esc(o.full_address || '—')}</span>
             </div>
-
-            ${containerSection}
-
-            <div class="ao-modal-section">
-                <h4 class="ao-modal-title"><i class="bi bi-receipt"></i> Payment Summary</h4>
-                <div class="ao-totals">
-                    <div class="ao-trow">
-                        <span>Subtotal</span>
-                        <strong>${money(o.subtotal)}</strong>
-                    </div>
-                    <div class="ao-trow">
-                        <span>Delivery charge</span>
-                        <strong>${money(o.division_charge)}</strong>
-                    </div>
-                    <div class="ao-trow grand">
-                        <span>Total</span>
-                        <strong>${money(o.total_amount)}</strong>
-                    </div>
+            ${o.map_link ? `
+                <div class="ao-info-row">
+                    <span class="lbl">Google Maps</span>
+                    <span class="val">
+                        <a class="ao-call" href="${esc(o.map_link)}" target="_blank" rel="noopener">
+                            <i class="bi bi-geo-alt-fill"></i> Open Location
+                        </a>
+                    </span>
                 </div>
-            </div>
+            ` : ''}
+        </div>
+    </div>
 
-            <div class="ao-modal-section">
-                <h4 class="ao-modal-title"><i class="bi bi-shield-check"></i> Status</h4>
-                <div class="ao-info-list">
-                    <div class="ao-info-row">
-                        <span class="lbl">Payment</span>
-                        <span class="val">
-                            <span class="ao-pill ${isPaid ? 'is-paid' : 'is-unpaid'}">
-                                <i class="bi ${isPaid ? 'bi-check-circle-fill' : 'bi-x-circle-fill'}"></i>
-                                ${isPaid ? 'Paid' : 'Unpaid'}
-                            </span>
-                        </span>
-                    </div>
-                    <div class="ao-info-row">
-                        <span class="lbl">Delivery</span>
-                        <span class="val">
-                            <span class="ao-pill ${isEnabled ? 'is-enabled' : 'is-disabled'}">
-                                <i class="bi ${isEnabled ? 'bi-truck' : 'bi-hourglass-split'}"></i>
-                                ${isEnabled ? 'Delivered' : 'Pending'}
-                            </span>
-                        </span>
-                    </div>
-                </div>
+    ${o.house_image ? `
+        <div class="ao-modal-section">
+            <h4 class="ao-modal-title"><i class="bi bi-image"></i> House Image</h4>
+            <div style="border-radius:12px;overflow:hidden;border:1px solid #f0ebe4;">
+                <img src="${esc(window.MAIN_URL || window.BASE_URL.replace(/delivery-boy\/?$/, 'customer/') || '')}${esc(o.house_image)}"
+                     alt="House"
+                     style="width:100%;max-height:220px;object-fit:cover;display:block;"
+                     onerror="this.style.display='none';this.parentElement.innerHTML='<div style=\\'padding:14px;text-align:center;color:#948c82;font-size:12px;\\'>Image not available</div>';">
             </div>
-        `;
+        </div>
+    ` : ''}
+
+    ${o.order_note ? `
+        <div class="ao-modal-section">
+            <h4 class="ao-modal-title"><i class="bi bi-chat-left-text"></i> Order Note</h4>
+            <div style="background:#fdf7ec;border:1px solid #f3dca5;border-radius:10px;padding:12px 14px;font-size:12.5px;color:#6f5a3f;font-weight:600;line-height:1.5;">
+                ${esc(o.order_note)}
+            </div>
+        </div>
+    ` : ''}
+
+    <div class="ao-modal-section">
+        <h4 class="ao-modal-title"><i class="bi bi-basket3-fill"></i> Items</h4>
+        <div class="ao-products">
+            ${productsHtml || '<div style="padding:14px;text-align:center;color:#948c82;font-size:12px;">No items</div>'}
+        </div>
+    </div>
+
+    ${containerSection}
+
+    <div class="ao-modal-section">
+        <h4 class="ao-modal-title"><i class="bi bi-receipt"></i> Payment Summary</h4>
+        <div class="ao-totals">
+            <div class="ao-trow">
+                <span>Subtotal</span>
+                <strong>${money(o.subtotal)}</strong>
+            </div>
+            <div class="ao-trow">
+                <span>Delivery charge</span>
+                <strong>${money(o.division_charge)}</strong>
+            </div>
+            <div class="ao-trow grand">
+                <span>Total</span>
+                <strong>${money(o.total_amount)}</strong>
+            </div>
+        </div>
+    </div>
+
+    <div class="ao-modal-section">
+        <h4 class="ao-modal-title"><i class="bi bi-shield-check"></i> Status</h4>
+        <div class="ao-info-list">
+            <div class="ao-info-row">
+                <span class="lbl">Payment</span>
+                <span class="val">
+                    <span class="ao-pill ${isPaid ? 'is-paid' : 'is-unpaid'}">
+                        <i class="bi ${isPaid ? 'bi-check-circle-fill' : 'bi-x-circle-fill'}"></i>
+                        ${isPaid ? 'Paid' : 'Unpaid'}
+                    </span>
+                </span>
+            </div>
+            <div class="ao-info-row">
+                <span class="lbl">Delivery</span>
+                <span class="val">
+                    <span class="ao-pill ${isEnabled ? 'is-enabled' : 'is-disabled'}">
+                        <i class="bi ${isEnabled ? 'bi-truck' : 'bi-hourglass-split'}"></i>
+                        ${isEnabled ? 'Delivered' : 'Pending'}
+                    </span>
+                </span>
+            </div>
+        </div>
+    </div>
+`;
 
         modal.classList.add("show");
         modal.setAttribute("aria-hidden", "false");
@@ -712,7 +735,7 @@
                 }
 
                 showToast(res.message || "Request sent.");
-                
+
                 walletAmount.value = "";
                 walletNote.value = "";
                 updateWalletPreview();

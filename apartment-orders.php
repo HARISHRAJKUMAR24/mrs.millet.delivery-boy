@@ -55,8 +55,6 @@ if (!in_array($statusFilter, $allowedStatus, true)) $statusFilter = 'pending';
 
 /* =========================================================
    ORDERS
-   - Uses CURDATE() to ensure today's pending only shows today's orders
-   - Tomorrow's orders are hidden until their date arrives
    ========================================================= */
 $orders = [];
 try {
@@ -67,7 +65,7 @@ try {
                 c.mobile_number   AS customer_mobile,
                 o.address_type, o.address_json,
                 o.division_charge, o.subtotal, o.total_amount,
-                o.products_json,
+                o.products_json, o.order_note,
                 o.status, o.delivery_status, o.payment_status,
                 o.payment_ref, o.paid_at, o.created_at, o.updated_at,
 
@@ -87,20 +85,15 @@ try {
 
     $params = [$aptCode, $boyId];
 
-    // Logic to filter by TODAY
     if ($statusFilter === 'pending') {
-        // ONLY show orders placed TODAY that are still pending
         $sql .= " AND o.delivery_status = 'disabled' AND DATE(o.created_at) = CURDATE()";
     } elseif ($statusFilter === 'delivered') {
-        // Show orders delivered TODAY (based on when it was delivered/updated)
         $sql .= " AND o.delivery_status = 'enabled' AND DATE(o.updated_at) = CURDATE()";
     } else {
-        // "All" tab -> only show orders created today
         $sql .= " AND DATE(o.created_at) = CURDATE()";
     }
 
     if ($dateFilter !== '') {
-        // If user picks a specific date, override the default today filter
         $sql .= " AND DATE(o.created_at) = ?";
         $params[] = $dateFilter;
     }
@@ -111,7 +104,6 @@ try {
     $stmt->execute($params);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    /* Inject apartment_name / division_label from JSON */
     foreach ($rows as &$r) {
         $addr = json_decode($r['address_json'] ?? '[]', true);
         if (!is_array($addr)) $addr = [];
@@ -129,8 +121,7 @@ try {
 }
 
 /* =========================================================
-   CONTAINER SUMMARY (per customer, this apartment, this boy)
-   Only includes orders placed today
+   CONTAINER SUMMARY
    ========================================================= */
 $containerSummary = [];
 try {
@@ -176,7 +167,7 @@ try {
 } catch (PDOException $e) {
 }
 
-/* Prepare JS payload — flat shape that apartment-orders.js expects */
+/* Prepare JS payload */
 $ordersJson = array_map(function ($o) {
     return [
         'id'                 => (int)$o['id'],
@@ -196,6 +187,7 @@ $ordersJson = array_map(function ($o) {
         'payment_status'     => $o['payment_status'],
         'payment_ref'        => $o['payment_ref'],
         'paid_at'            => $o['paid_at'],
+        'order_note'         => $o['order_note'] ?? '',
         'products'           => json_decode($o['products_json'] ?? '[]', true) ?: [],
         'total_containers'   => (int)($o['total_containers'] ?? 0),
         'received_containers' => (int)($o['received_containers'] ?? 0),
@@ -212,6 +204,7 @@ $ordersJson = array_map(function ($o) {
     <?php include './includes/head.php'; ?>
 
     <style>
+        /* ========== existing styles ========== */
         .ao-page {
             padding: 24px 26px 40px;
         }
@@ -346,11 +339,6 @@ $ordersJson = array_map(function ($o) {
             cursor: pointer;
         }
 
-        .ao-date:focus {
-            border-color: #b51f2c;
-            box-shadow: 0 0 0 3px rgba(181, 31, 44, .06);
-        }
-
         .ao-clear-btn {
             height: 36px;
             padding: 0 14px;
@@ -405,7 +393,7 @@ $ordersJson = array_map(function ($o) {
             padding: 14px 16px;
             border-bottom: 1px solid #f5efe5;
             color: #302923;
-            vertical-align: middle;
+            vertical-align: top;
         }
 
         .ao-table tbody tr:last-child td {
@@ -455,6 +443,35 @@ $ordersJson = array_map(function ($o) {
         .ao-phone:hover {
             background: #b51f2c;
             color: #fff;
+        }
+
+        /* ✅ Notes shown inline — always visible */
+        .ao-inline-note {
+            display: flex;
+            gap: 6px;
+            align-items: flex-start;
+            margin-top: 8px;
+            padding: 8px 10px;
+            background: #fdf7ec;
+            border: 1px dashed #f3dca5;
+            border-radius: 8px;
+            font-size: 11.5px;
+            color: #6f5a3f;
+            font-weight: 600;
+            line-height: 1.45;
+            max-width: 260px;
+            word-break: break-word;
+        }
+
+        .ao-inline-note i {
+            color: #b8893c;
+            font-size: 12px;
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+
+        .ao-inline-note .note-text {
+            min-width: 0;
         }
 
         .ao-pill {
@@ -705,479 +722,7 @@ $ordersJson = array_map(function ($o) {
             padding: 20px 22px 22px;
         }
 
-        .ao-modal-section {
-            margin-bottom: 22px;
-        }
-
-        .ao-modal-section:last-child {
-            margin-bottom: 0;
-        }
-
-        .ao-modal-title {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 11px;
-            font-weight: 800;
-            letter-spacing: .08em;
-            text-transform: uppercase;
-            color: #948c82;
-            margin: 0 0 12px;
-        }
-
-        .ao-modal-title i {
-            color: #b51f2c;
-        }
-
-        .ao-info-list {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            background: #fdfaf4;
-            border: 1px solid #f0ebe4;
-            border-radius: 12px;
-            padding: 14px 16px;
-        }
-
-        .ao-info-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            font-size: 12.5px;
-        }
-
-        .ao-info-row .lbl {
-            color: #948c82;
-            font-weight: 600;
-        }
-
-        .ao-info-row .val {
-            color: #302923;
-            font-weight: 700;
-            text-align: right;
-            word-break: break-word;
-        }
-
-        .ao-call {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 4px 10px;
-            background: #fff5f5;
-            color: #b51f2c;
-            font-weight: 800;
-            border-radius: 8px;
-            text-decoration: none;
-        }
-
-        .ao-call:hover {
-            background: #b51f2c;
-            color: #fff;
-        }
-
-        .ao-products {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            border: 1px solid #f0ebe4;
-            border-radius: 12px;
-            padding: 8px;
-        }
-
-        .ao-prod {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 10px;
-            background: #fdfaf4;
-            border-radius: 10px;
-        }
-
-        .ao-prod-thumb {
-            width: 44px;
-            height: 44px;
-            border-radius: 10px;
-            background: #f7efe3;
-            overflow: hidden;
-            flex-shrink: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 18px;
-        }
-
-        .ao-prod-thumb img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-
-        .ao-prod-info {
-            flex: 1;
-            min-width: 0;
-        }
-
-        .ao-prod-name {
-            font-size: 12.5px;
-            font-weight: 700;
-            color: #302923;
-            margin: 0;
-            line-height: 1.3;
-        }
-
-        .ao-prod-meta {
-            font-size: 11px;
-            color: #948c82;
-            margin: 2px 0 0;
-            font-weight: 600;
-        }
-
-        .ao-prod-price {
-            font-size: 12.5px;
-            font-weight: 800;
-            color: #b51f2c;
-            white-space: nowrap;
-        }
-
-        .ao-totals {
-            background: #fdfaf4;
-            border: 1px solid #f0ebe4;
-            border-radius: 12px;
-            padding: 14px 16px;
-        }
-
-        .ao-trow {
-            display: flex;
-            justify-content: space-between;
-            font-size: 12.5px;
-            color: #6f675f;
-            font-weight: 600;
-            padding: 4px 0;
-        }
-
-        .ao-trow strong {
-            color: #302923;
-            font-weight: 800;
-        }
-
-        .ao-trow.grand {
-            font-size: 15px;
-            margin-top: 8px;
-            padding-top: 10px;
-            border-top: 1.5px dashed #e4ddd3;
-        }
-
-        .ao-trow.grand strong {
-            color: #b51f2c;
-            font-size: 17px;
-        }
-
-        .ao-field {
-            margin-bottom: 14px;
-        }
-
-        .ao-field label {
-            display: block;
-            font-size: 10.5px;
-            font-weight: 800;
-            color: #4e4841;
-            margin-bottom: 6px;
-            text-transform: uppercase;
-            letter-spacing: .05em;
-        }
-
-        .ao-field input,
-        .ao-field textarea {
-            width: 100%;
-            height: 46px;
-            border: 1.5px solid #ece5da;
-            background: #fffdf9;
-            border-radius: 11px;
-            padding: 0 14px;
-            font-family: "DM Sans", sans-serif;
-            font-size: 13px;
-            font-weight: 600;
-            color: #292521;
-            outline: none;
-            transition: .15s ease;
-        }
-
-        .ao-field textarea {
-            height: auto;
-            min-height: 70px;
-            padding: 12px 14px;
-            resize: vertical;
-        }
-
-        .ao-field input:focus,
-        .ao-field textarea:focus {
-            border-color: #b51f2c;
-            background: #fff;
-            box-shadow: 0 0 0 4px rgba(181, 31, 44, .08);
-        }
-
-        .ao-field .hint {
-            font-size: 11px;
-            color: #948c82;
-            margin-top: 6px;
-            font-weight: 600;
-        }
-
-        .ao-field .hint.green {
-            color: #1b5e20;
-        }
-
-        .ao-field .hint.red {
-            color: #b51f2c;
-        }
-
-        .ao-quick-btns {
-            display: flex;
-            gap: 6px;
-            flex-wrap: wrap;
-            margin-top: 8px;
-        }
-
-        .ao-quick-btn {
-            height: 30px;
-            padding: 0 12px;
-            border-radius: 8px;
-            border: 1.5px solid #ece5da;
-            background: #fff;
-            font-family: "DM Sans", sans-serif;
-            font-size: 11px;
-            font-weight: 800;
-            color: #6f675f;
-            cursor: pointer;
-            transition: .15s ease;
-        }
-
-        .ao-quick-btn:hover {
-            background: #fbe8e9;
-            border-color: #f1c8cc;
-            color: #b51f2c;
-        }
-
-        .ao-modal-actions {
-            display: flex;
-            gap: 10px;
-            margin-top: 20px;
-        }
-
-        .ao-modal-btn {
-            flex: 1;
-            height: 46px;
-            border-radius: 11px;
-            border: none;
-            font-family: "DM Sans", sans-serif;
-            font-size: 12.5px;
-            font-weight: 800;
-            cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 7px;
-            transition: .18s ease;
-        }
-
-        .ao-modal-btn.primary {
-            background: linear-gradient(135deg, #b51f2c 0%, #8e1722 100%);
-            color: #fff;
-            box-shadow: 0 8px 20px rgba(181, 31, 44, .22);
-        }
-
-        .ao-modal-btn.primary:hover:not(:disabled) {
-            transform: translateY(-1px);
-        }
-
-        .ao-modal-btn.primary:disabled {
-            opacity: .55;
-            cursor: not-allowed;
-        }
-
-        .ao-modal-btn.green {
-            background: linear-gradient(135deg, #1f7a3d 0%, #14532d 100%);
-            color: #fff;
-            box-shadow: 0 8px 20px rgba(31, 122, 61, .25);
-        }
-
-        .ao-modal-btn.green:hover:not(:disabled) {
-            transform: translateY(-1px);
-        }
-
-        .ao-modal-btn.green:disabled {
-            opacity: .55;
-            cursor: not-allowed;
-        }
-
-        .ao-modal-btn.ghost {
-            background: #fff;
-            border: 1.5px solid #e4ddd3;
-            color: #6f675f;
-        }
-
-        .ao-modal-btn.ghost:hover {
-            background: #faf7f0;
-        }
-
-        .ao-wallet-tabs {
-            display: flex;
-            gap: 4px;
-            background: #faf7f0;
-            border-radius: 12px;
-            padding: 4px;
-            margin-bottom: 16px;
-        }
-
-        .ao-wallet-tab {
-            flex: 1;
-            height: 42px;
-            border-radius: 9px;
-            border: none;
-            background: transparent;
-            font-family: "DM Sans", sans-serif;
-            font-size: 12px;
-            font-weight: 800;
-            color: #817a71;
-            cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-            transition: .15s ease;
-        }
-
-        .ao-wallet-tab.active {
-            background: #fff;
-            color: #302923;
-            box-shadow: 0 3px 10px rgba(48, 41, 35, .07);
-        }
-
-        .ao-wallet-tab.credit.active {
-            color: #1b5e20;
-        }
-
-        .ao-wallet-tab.debit.active {
-            color: #b51f2c;
-        }
-
-        .ao-wallet-balance {
-            background: linear-gradient(135deg, #fdfaf4 0%, #fff5f5 100%);
-            border: 1.5px solid #ece5da;
-            border-radius: 14px;
-            padding: 16px 20px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 16px;
-            flex-wrap: wrap;
-            margin-bottom: 16px;
-        }
-
-        .ao-wallet-balance .lbl {
-            font-size: 10px;
-            font-weight: 800;
-            color: #948c82;
-            text-transform: uppercase;
-            letter-spacing: .07em;
-            margin-bottom: 4px;
-        }
-
-        .ao-wallet-balance .val {
-            font-family: "Playfair Display", serif;
-            font-size: 24px;
-            font-weight: 700;
-            color: #b51f2c;
-            line-height: 1.1;
-        }
-
-        .ao-history-wrap {
-            max-height: 280px;
-            overflow-y: auto;
-            border: 1.5px solid #ece5da;
-            border-radius: 12px;
-            background: #fff;
-        }
-
-        .ao-history-wrap::-webkit-scrollbar {
-            width: 6px;
-        }
-
-        .ao-history-wrap::-webkit-scrollbar-thumb {
-            background: #e0d8cd;
-            border-radius: 4px;
-        }
-
-        .ao-history-table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-
-        .ao-history-table th {
-            background: #faf7f0;
-            color: #938a80;
-            font-size: 9px;
-            font-weight: 800;
-            text-transform: uppercase;
-            letter-spacing: .7px;
-            padding: 10px 12px;
-            border-bottom: 1px solid #eee7dc;
-            text-align: left;
-            position: sticky;
-            top: 0;
-            z-index: 2;
-        }
-
-        .ao-history-table td {
-            padding: 11px 12px;
-            border-bottom: 1px solid #f2ede5;
-            font-size: 11.5px;
-            color: #4c4640;
-            vertical-align: middle;
-        }
-
-        .ao-history-table tr:last-child td {
-            border-bottom: 0;
-        }
-
-        .ao-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            padding: 3px 8px;
-            border-radius: 6px;
-            font-size: 9.5px;
-            font-weight: 800;
-            text-transform: uppercase;
-        }
-
-        .ao-badge.credit {
-            background: #e8f1e8;
-            color: #52745b;
-        }
-
-        .ao-badge.debit {
-            background: #fbeaea;
-            color: #b51f2c;
-        }
-
-        .ao-amt-credit {
-            color: #1b5e20;
-            font-weight: 800;
-        }
-
-        .ao-amt-debit {
-            color: #b51f2c;
-            font-weight: 800;
-        }
-
-        .ao-bal-cell {
-            font-family: "Playfair Display", serif;
-            font-weight: 700;
-            color: #302923;
-        }
-
+        /* Toast */
         .ao-toast {
             position: fixed;
             top: 84px;
@@ -1247,16 +792,13 @@ $ordersJson = array_map(function ($o) {
             <button class="menu-toggle" id="menuToggle" aria-label="Open menu">
                 <i class="bi bi-list"></i>
             </button>
-
             <div class="tb-title">
                 <h2>Apartment Orders</h2>
                 <p><?= htmlspecialchars($apartment['apartment_name']) ?></p>
             </div>
-
             <div class="tb-actions">
                 <a href="<?= BASE_URL ?>notifications.php" class="tb-icon-btn">
-                    <i class="bi bi-bell"></i>
-                    <span class="tb-dot"></span>
+                    <i class="bi bi-bell"></i><span class="tb-dot"></span>
                 </a>
                 <a href="<?= BASE_URL ?>profile.php" class="tb-icon-btn">
                     <i class="bi bi-person"></i>
@@ -1264,18 +806,14 @@ $ordersJson = array_map(function ($o) {
             </div>
         </header>
 
-
         <main class="ao-page">
-
             <a href="<?= BASE_URL ?>delivery-orders.php" class="ao-back">
                 <i class="bi bi-arrow-left"></i> Back to My Apartments
             </a>
 
             <div class="ao-head">
                 <div class="ao-head-left">
-                    <div class="ao-head-icon">
-                        <i class="bi bi-building"></i>
-                    </div>
+                    <div class="ao-head-icon"><i class="bi bi-building"></i></div>
                     <div>
                         <h1><?= htmlspecialchars($apartment['apartment_name']) ?></h1>
                         <p>
@@ -1310,12 +848,10 @@ $ordersJson = array_map(function ($o) {
                 <button type="submit" class="ao-clear-btn" id="applyBtn">
                     <i class="bi bi-funnel"></i> Apply
                 </button>
-
                 <a href="?code=<?= urlencode($aptCode) ?>&status=pending" class="ao-clear-btn">
                     <i class="bi bi-arrow-counterclockwise"></i> Clear
                 </a>
             </form>
-
 
             <?php if (empty($orders)): ?>
                 <div class="ao-table-wrap">
@@ -1363,10 +899,10 @@ $ordersJson = array_map(function ($o) {
                                 $isLocked = false;
                                 if ($isEnabled && !empty($o['updated_at'])) {
                                     $updatedTs = strtotime($o['updated_at']);
-                                    if ($updatedTs && (time() - $updatedTs) > 5 * 3600) {
-                                        $isLocked = true;
-                                    }
+                                    if ($updatedTs && (time() - $updatedTs) > 5 * 3600) $isLocked = true;
                                 }
+
+                                $oNote = trim((string)($o['order_note'] ?? ''));
                             ?>
                                 <tr
                                     data-id="<?= (int)$o['id'] ?>"
@@ -1376,6 +912,14 @@ $ordersJson = array_map(function ($o) {
                                     <td>
                                         <span class="ao-code">#<?= htmlspecialchars($o['order_code']) ?></span>
                                         <span class="ao-date-cell"><?= date('d M Y, h:i A', strtotime($o['created_at'])) ?></span>
+
+                                        <?php if ($oNote !== ''): ?>
+                                            <!-- ✅ Notes shown inline — always visible -->
+                                            <div class="ao-inline-note">
+                                                <i class="bi bi-chat-left-text"></i>
+                                                <span class="note-text"><?= htmlspecialchars($oNote) ?></span>
+                                            </div>
+                                        <?php endif; ?>
                                     </td>
                                     <td>
                                         <span class="ao-name"><?= htmlspecialchars($o['customer_name']) ?></span>
@@ -1417,18 +961,14 @@ $ordersJson = array_map(function ($o) {
                                             </button>
 
                                             <?php if ($isLocked): ?>
-                                                <button type="button"
-                                                    class="ao-toggle is-on is-locked"
-                                                    disabled
-                                                    title="Delivery locked (5 hours passed)">
+                                                <button type="button" class="ao-toggle is-on is-locked" disabled>
                                                     <i class="bi bi-lock-fill"></i> Locked
                                                 </button>
                                             <?php else: ?>
                                                 <button type="button"
                                                     class="ao-toggle js-toggle <?= $isEnabled ? 'is-on' : '' ?>"
                                                     data-id="<?= (int)$o['id'] ?>"
-                                                    data-enabled="<?= $isEnabled ? '1' : '0' ?>"
-                                                    title="Mark delivered">
+                                                    data-enabled="<?= $isEnabled ? '1' : '0' ?>">
                                                     <?php if ($isEnabled): ?>
                                                         <i class="bi bi-arrow-counterclockwise"></i> Undo
                                                     <?php else: ?>
@@ -1441,8 +981,7 @@ $ordersJson = array_map(function ($o) {
                                                 <button type="button"
                                                     class="ao-mini-btn js-container"
                                                     data-id="<?= (int)$o['id'] ?>"
-                                                    data-mobile="<?= htmlspecialchars($o['customer_mobile']) ?>"
-                                                    title="Container return">
+                                                    data-mobile="<?= htmlspecialchars($o['customer_mobile']) ?>">
                                                     <i class="bi bi-box2-heart"></i> Return
                                                 </button>
                                             <?php endif; ?>
@@ -1452,8 +991,7 @@ $ordersJson = array_map(function ($o) {
                                                     class="ao-mini-btn wallet js-wallet"
                                                     data-id="<?= (int)$o['id'] ?>"
                                                     data-mobile="<?= htmlspecialchars($o['customer_mobile']) ?>"
-                                                    data-name="<?= htmlspecialchars($o['customer_name']) ?>"
-                                                    title="Manage wallet">
+                                                    data-name="<?= htmlspecialchars($o['customer_name']) ?>">
                                                     <i class="bi bi-wallet2"></i> Wallet
                                                 </button>
                                             <?php endif; ?>
@@ -1465,12 +1003,10 @@ $ordersJson = array_map(function ($o) {
                     </table>
                 </div>
             <?php endif; ?>
-
         </main>
     </div>
 
-
-    <!-- ================= ORDER DETAILS MODAL ================= -->
+    <!-- Order details modal -->
     <div class="ao-modal-overlay" id="aoModal" aria-hidden="true">
         <div class="ao-modal" role="dialog" aria-modal="true">
             <div class="ao-modal-head">
@@ -1478,16 +1014,13 @@ $ordersJson = array_map(function ($o) {
                     <h3 id="amCode">#ORDER</h3>
                     <p id="amDate">—</p>
                 </div>
-                <button type="button" class="ao-modal-close" id="amClose">
-                    <i class="bi bi-x-lg"></i>
-                </button>
+                <button type="button" class="ao-modal-close" id="amClose"><i class="bi bi-x-lg"></i></button>
             </div>
             <div class="ao-modal-body" id="amBody"></div>
         </div>
     </div>
 
-
-    <!-- ================= CONTAINER RETURN MODAL ================= -->
+    <!-- Container modal -->
     <div class="ao-modal-overlay" id="aoContainerModal" aria-hidden="true">
         <div class="ao-modal" role="dialog" aria-modal="true" style="max-width:520px;">
             <div class="ao-modal-head">
@@ -1495,20 +1028,14 @@ $ordersJson = array_map(function ($o) {
                     <h3>Container Return</h3>
                     <p id="containerModalSub">Refund will be credited to customer wallet.</p>
                 </div>
-                <button type="button" class="ao-modal-close" id="containerModalClose">
-                    <i class="bi bi-x-lg"></i>
-                </button>
+                <button type="button" class="ao-modal-close" id="containerModalClose"><i class="bi bi-x-lg"></i></button>
             </div>
             <div class="ao-modal-body">
-
                 <div class="ao-info-list" style="margin-bottom:14px;" id="containerModalInfo"></div>
-
                 <div id="containerBreakdown" style="margin-bottom:16px;"></div>
-
                 <form id="containerForm" autocomplete="off">
                     <input type="hidden" id="containerOrderId" value="">
                     <input type="hidden" id="containerMobile" value="">
-
                     <div class="ao-field">
                         <label>Returned Containers <span style="color:#b51f2c;">*</span></label>
                         <input type="number" id="containerCount" min="1" step="1" required placeholder="0">
@@ -1520,24 +1047,20 @@ $ordersJson = array_map(function ($o) {
                         </div>
                         <div class="hint" id="containerQtyHint">—</div>
                     </div>
-
                     <div class="ao-field">
                         <label>Note (optional)</label>
                         <textarea id="containerNote" maxlength="250" placeholder="e.g. returned in good condition"></textarea>
                     </div>
-
                     <div class="ao-info-list" style="background:#e8f6ea;border-color:#a7c8a9;">
                         <div class="ao-info-row">
                             <span class="lbl" style="color:#1b5e20;">Refund to wallet</span>
                             <span class="val" id="containerRefund" style="color:#1b5e20;">₹0</span>
                         </div>
                     </div>
-
                     <div class="ao-modal-actions">
                         <button type="button" class="ao-modal-btn ghost" id="containerCancel">Cancel</button>
                         <button type="submit" class="ao-modal-btn green" id="containerSubmit">
-                            <i class="bi bi-check-lg"></i>
-                            <span id="containerSubmitText">Mark Returned</span>
+                            <i class="bi bi-check-lg"></i> <span id="containerSubmitText">Mark Returned</span>
                         </button>
                     </div>
                 </form>
@@ -1545,8 +1068,7 @@ $ordersJson = array_map(function ($o) {
         </div>
     </div>
 
-
-    <!-- ================= WALLET MODAL ================= -->
+    <!-- Wallet modal -->
     <div class="ao-modal-overlay" id="aoWalletModal" aria-hidden="true">
         <div class="ao-modal" role="dialog" aria-modal="true" style="max-width:520px;">
             <div class="ao-modal-head">
@@ -1554,14 +1076,10 @@ $ordersJson = array_map(function ($o) {
                     <h3>Manage Wallet</h3>
                     <p id="walletModalSub">Add or deduct money from customer wallet</p>
                 </div>
-                <button type="button" class="ao-modal-close" id="walletModalClose">
-                    <i class="bi bi-x-lg"></i>
-                </button>
+                <button type="button" class="ao-modal-close" id="walletModalClose"><i class="bi bi-x-lg"></i></button>
             </div>
             <div class="ao-modal-body">
-
                 <div class="ao-info-list" style="margin-bottom:14px;" id="walletModalInfo"></div>
-
                 <div class="ao-wallet-balance">
                     <div>
                         <div class="lbl">Current Balance</div>
@@ -1569,20 +1087,13 @@ $ordersJson = array_map(function ($o) {
                     </div>
                     <span style="font-size:11px;color:#948c82;font-weight:700;" id="walletStatusLabel">—</span>
                 </div>
-
                 <div class="ao-wallet-tabs" id="walletTabs">
-                    <button type="button" class="ao-wallet-tab credit active" data-wtab="credit">
-                        <i class="bi bi-plus-circle"></i> Add Money
-                    </button>
-                    <button type="button" class="ao-wallet-tab debit" data-wtab="debit">
-                        <i class="bi bi-dash-circle"></i> Deduct Money
-                    </button>
+                    <button type="button" class="ao-wallet-tab credit active" data-wtab="credit"><i class="bi bi-plus-circle"></i> Add Money</button>
+                    <button type="button" class="ao-wallet-tab debit" data-wtab="debit"><i class="bi bi-dash-circle"></i> Deduct Money</button>
                 </div>
-
                 <form id="walletForm" autocomplete="off">
                     <input type="hidden" id="walletMobile" value="">
                     <input type="hidden" id="walletTxnType" value="credit">
-
                     <div class="ao-field">
                         <label>Amount (₹) <span style="color:#b51f2c;">*</span></label>
                         <input type="number" id="walletAmount" min="1" step="0.01" required placeholder="0.00">
@@ -1593,51 +1104,39 @@ $ordersJson = array_map(function ($o) {
                             <button type="button" class="ao-quick-btn" data-wamt="2000">₹2000</button>
                         </div>
                     </div>
-
                     <div class="ao-field">
                         <label>Note (optional)</label>
                         <textarea id="walletNote" maxlength="250" placeholder="e.g. cash received"></textarea>
                     </div>
-
                     <div class="ao-info-list" style="background:#fdfaf4;border:1px solid #f0ebe4;margin-bottom:6px;">
                         <div class="ao-info-row">
                             <span class="lbl">New Balance will be</span>
                             <span class="val" id="walletPreview" style="font-family:'Playfair Display',serif;font-size:16px;color:#1f7a3d;font-weight:700;">₹0</span>
                         </div>
                     </div>
-
                     <div class="ao-modal-actions">
                         <button type="button" class="ao-modal-btn ghost" id="walletCancel">Cancel</button>
                         <button type="submit" class="ao-modal-btn primary" id="walletSubmit">
-                            <i class="bi bi-check-lg"></i>
-                            <span id="walletSubmitText">Add Money</span>
+                            <i class="bi bi-check-lg"></i> <span id="walletSubmitText">Add Money</span>
                         </button>
                     </div>
                 </form>
-
                 <div style="margin-top:24px;">
                     <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;">
                         <h4 style="margin:0;font-family:'Playfair Display',serif;font-size:14px;font-weight:700;color:#302923;">
                             <i class="bi bi-clock-history" style="color:#b51f2c;margin-right:4px;"></i> Recent Transactions
                         </h4>
-                        <button type="button" class="ao-mini-btn" id="walletRefreshHistory">
-                            <i class="bi bi-arrow-clockwise"></i> Refresh
-                        </button>
+                        <button type="button" class="ao-mini-btn" id="walletRefreshHistory"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
                     </div>
                     <div class="ao-history-wrap" id="walletHistory">
-                        <div style="padding:24px;text-align:center;color:#948c82;font-size:11.5px;">
-                            Loading…
-                        </div>
+                        <div style="padding:24px;text-align:center;color:#948c82;font-size:11.5px;">Loading…</div>
                     </div>
                 </div>
-
             </div>
         </div>
     </div>
 
-
     <div class="ao-toast" id="aoToast"></div>
-
 
     <script>
         window.BASE_URL = "<?= BASE_URL ?>";

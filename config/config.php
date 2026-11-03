@@ -14,8 +14,6 @@ define('DB_PASS', '');
 // APPLICATION URL CONFIGURATION
 // =========================================
 
-// Existing Admin Panel URL
-// DO NOT CHANGE
 define(
     'ADMIN_URL',
     'http://localhost/mrs.millet.admin/'
@@ -28,6 +26,10 @@ define(
     'http://localhost/mrs.millet.delivery-boy/'
 );
 
+define(
+    'MAIN_URL',
+    'http://localhost/mrs.millet.customer/'
+);
 
 
 // =========================================
