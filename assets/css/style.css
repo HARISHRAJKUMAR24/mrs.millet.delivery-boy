@@ -280,6 +280,19 @@ a {
     transform: translateX(3px);
 }
 
+/* Active menu item */
+.sb-nav a.active {
+    background: #fbe8e9;
+    /* Light red background */
+    color: #b51f2c;
+    /* Red text */
+    font-weight: 800;
+}
+
+.sb-nav a.active i {
+    color: #b51f2c;
+}
+
 /* ============ MAIN ============ */
 .main {
     flex: 1;

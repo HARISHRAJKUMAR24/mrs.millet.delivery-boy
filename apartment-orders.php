@@ -204,7 +204,6 @@ $ordersJson = array_map(function ($o) {
     <?php include './includes/head.php'; ?>
 
     <style>
-        /* ========== existing styles ========== */
         .ao-page {
             padding: 24px 26px 40px;
         }
@@ -445,7 +444,6 @@ $ordersJson = array_map(function ($o) {
             color: #fff;
         }
 
-        /* ✅ Notes shown inline — always visible */
         .ao-inline-note {
             display: flex;
             gap: 6px;
@@ -632,7 +630,9 @@ $ordersJson = array_map(function ($o) {
             margin-bottom: 10px;
         }
 
-        /* Modal */
+        /* =====================================================
+           MODAL + POPUP CONTENT (Desktop)
+           ===================================================== */
         .ao-modal-overlay {
             position: fixed;
             inset: 0;
@@ -722,6 +722,173 @@ $ordersJson = array_map(function ($o) {
             padding: 20px 22px 22px;
         }
 
+        /* --- Popup inner sections --- */
+        .ao-modal-section {
+            margin-bottom: 18px;
+        }
+
+        .ao-modal-title {
+            margin: 0 0 10px;
+            font-size: 13px;
+            font-weight: 800;
+            color: #302923;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-family: "DM Sans", sans-serif;
+        }
+
+        .ao-modal-title i {
+            color: #b51f2c;
+            font-size: 14px;
+        }
+
+        .ao-info-list {
+            border: 1.5px solid #f0ebe4;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .ao-info-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 14px;
+            border-bottom: 1px solid #f5efe5;
+            font-size: 12.5px;
+            gap: 12px;
+        }
+
+        .ao-info-row:last-child {
+            border-bottom: 0;
+        }
+
+        .ao-info-row .lbl {
+            color: #948c82;
+            font-size: 10.5px;
+            font-weight: 800;
+            letter-spacing: .05em;
+            text-transform: uppercase;
+        }
+
+        .ao-info-row .val {
+            color: #302923;
+            font-weight: 700;
+            text-align: right;
+            word-break: break-word;
+        }
+
+        .ao-call {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            color: #b51f2c;
+            text-decoration: none;
+            font-weight: 800;
+        }
+
+        /* Items */
+        .ao-products {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .ao-prod {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 12px;
+            border: 1.5px solid #f0ebe4;
+            border-radius: 12px;
+            background: #fffdf9;
+        }
+
+        .ao-prod-thumb {
+            width: 48px;
+            height: 48px;
+            border-radius: 8px;
+            background: #f4efe8;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            flex-shrink: 0;
+            font-size: 20px;
+        }
+
+        .ao-prod-thumb img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .ao-prod-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .ao-prod-name {
+            margin: 0 0 3px;
+            font-size: 13px;
+            font-weight: 700;
+            color: #302923;
+            line-height: 1.3;
+        }
+
+        .ao-prod-meta {
+            margin: 0;
+            font-size: 10.5px;
+            color: #948c82;
+            font-weight: 600;
+        }
+
+        .ao-prod-price {
+            font-weight: 800;
+            color: #302923;
+            font-size: 13px;
+            flex-shrink: 0;
+        }
+
+        /* Totals */
+        .ao-totals {
+            border: 1.5px solid #f0ebe4;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .ao-trow {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 9px 14px;
+            font-size: 12.5px;
+            color: #6f675f;
+            border-bottom: 1px solid #f5efe5;
+        }
+
+        .ao-trow:last-child {
+            border-bottom: 0;
+        }
+
+        .ao-trow strong {
+            color: #302923;
+            font-weight: 800;
+        }
+
+        .ao-trow.grand {
+            background: #fdfaf4;
+            color: #302923;
+            font-weight: 800;
+            font-size: 13.5px;
+        }
+
+        .ao-trow.grand strong {
+            font-family: "Playfair Display", serif;
+            font-size: 15px;
+            color: #b51f2c;
+        }
+
         /* Toast */
         .ao-toast {
             position: fixed;
@@ -768,13 +935,284 @@ $ordersJson = array_map(function ($o) {
             }
         }
 
+        /* =====================================================
+           RESPONSIVE — card layout below 900px
+           ===================================================== */
         @media (max-width: 900px) {
-            .ao-table-wrap {
-                overflow-x: auto;
+            .ao-page {
+                padding: 16px 12px 32px;
             }
 
-            .ao-table {
-                min-width: 900px;
+            .ao-head h1 {
+                font-size: 20px;
+            }
+
+            .ao-filters {
+                padding: 12px;
+                gap: 8px;
+            }
+
+            .ao-clear-btn {
+                margin-top: 0;
+            }
+
+            /* Hide the native table header */
+            .ao-table thead {
+                display: none;
+            }
+
+            /* Convert rows into cards */
+            .ao-table,
+            .ao-table tbody,
+            .ao-table tr,
+            .ao-table td {
+                display: block;
+                width: 100%;
+            }
+
+            .ao-table tbody tr {
+                background: #fff;
+                border: 1.5px solid #ece5da;
+                border-radius: 16px;
+                padding: 14px;
+                margin-bottom: 12px;
+                box-shadow: 0 4px 12px rgba(48, 41, 35, .04);
+            }
+
+            .ao-table tbody tr:last-child {
+                margin-bottom: 0;
+            }
+
+            .ao-table tbody td {
+                border: 0;
+                padding: 6px 0;
+                text-align: left;
+            }
+
+            .ao-table tbody td[data-lbl]::before {
+                content: attr(data-lbl);
+                display: block;
+                font-size: 9.5px;
+                font-weight: 800;
+                letter-spacing: .08em;
+                text-transform: uppercase;
+                color: #a19a90;
+                margin-bottom: 4px;
+            }
+
+            .ao-actions {
+                justify-content: flex-start;
+                margin-top: 6px;
+            }
+
+            /* Order + Customer row side by side within card */
+            .ao-table tbody tr {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 10px 12px;
+            }
+
+            .ao-table tbody tr>td:nth-child(1) {
+                grid-column: 1;
+            }
+
+            .ao-table tbody tr>td:nth-child(2) {
+                grid-column: 2;
+            }
+
+            .ao-table tbody tr>td:nth-child(3) {
+                grid-column: 1 / -1;
+            }
+
+            .ao-table tbody tr>td:nth-child(4) {
+                grid-column: 1;
+            }
+
+            .ao-table tbody tr>td:nth-child(5) {
+                grid-column: 2;
+            }
+
+            .ao-table tbody tr>td:nth-child(6) {
+                grid-column: 1;
+            }
+
+            .ao-table tbody tr>td:nth-child(7) {
+                grid-column: 1 / -1;
+            }
+
+            .ao-actions {
+                justify-content: flex-start;
+            }
+
+            .ao-toggle,
+            .ao-mini-btn,
+            .ao-icon-btn {
+                flex: 1 1 auto;
+                min-width: 0;
+            }
+
+            .ao-icon-btn {
+                flex: 0 0 auto;
+            }
+
+            /* === MODAL RESPONSIVE === */
+            .ao-modal-overlay {
+                padding: 12px;
+            }
+
+            .ao-modal {
+                max-width: 100%;
+                border-radius: 16px;
+                max-height: 92vh;
+            }
+
+            .ao-modal-head {
+                padding: 16px 16px 12px;
+            }
+
+            .ao-modal-head h3 {
+                font-size: 16px;
+            }
+
+            .ao-modal-body {
+                padding: 14px 16px 18px;
+            }
+
+            .ao-modal-section {
+                margin-bottom: 14px;
+            }
+
+            .ao-modal-title {
+                font-size: 12.5px;
+                margin-bottom: 8px;
+            }
+
+            .ao-info-row {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 3px;
+                padding: 8px 10px;
+            }
+
+            .ao-info-row .lbl {
+                font-size: 9.5px;
+            }
+
+            .ao-info-row .val {
+                text-align: left;
+                font-size: 12.5px;
+                width: 100%;
+            }
+
+            .ao-info-row[style*="column"] {
+                flex-direction: column !important;
+            }
+
+            .ao-prod {
+                flex-wrap: wrap;
+                gap: 10px;
+                padding: 10px;
+            }
+
+            .ao-prod-thumb {
+                width: 44px;
+                height: 44px;
+                flex: 0 0 44px;
+            }
+
+            .ao-prod-info {
+                flex: 1 1 60%;
+                min-width: 0;
+            }
+
+            .ao-prod-name {
+                font-size: 12.5px;
+            }
+
+            .ao-prod-price {
+                flex: 1 1 100%;
+                text-align: right;
+                font-size: 13px;
+                margin-top: 4px;
+            }
+
+            .ao-trow {
+                font-size: 12px;
+                padding: 7px 12px;
+            }
+
+            .ao-trow.grand {
+                font-size: 13px;
+            }
+
+            .ao-modal-body .ao-pill {
+                font-size: 10px;
+                padding: 3px 8px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .ao-head {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .ao-table tbody tr {
+                grid-template-columns: 1fr;
+            }
+
+            .ao-table tbody tr>td {
+                grid-column: 1 / -1 !important;
+            }
+
+            .ao-cell-btns .ao-cell-btn {
+                flex: 1 1 100%;
+                justify-content: center;
+            }
+
+            .ao-actions {
+                flex-wrap: wrap;
+            }
+
+            .ao-actions>* {
+                flex: 1 1 auto;
+            }
+
+            .ao-icon-btn {
+                flex: 0 0 auto;
+            }
+
+            /* === MODAL ULTRA SMALL === */
+            .ao-modal-overlay {
+                padding: 8px;
+            }
+
+            .ao-modal-head {
+                padding: 14px 14px 10px;
+            }
+
+            .ao-modal-head h3 {
+                font-size: 15px;
+            }
+
+            .ao-modal-head p {
+                font-size: 10.5px;
+            }
+
+            .ao-modal-body {
+                padding: 12px 14px 16px;
+            }
+
+            .ao-modal-title {
+                font-size: 11.5px;
+            }
+
+            .ao-prod {
+                flex-wrap: wrap;
+            }
+
+            .ao-prod-price {
+                text-align: left;
             }
         }
     </style>
@@ -909,19 +1347,18 @@ $ordersJson = array_map(function ($o) {
                                     data-mobile="<?= htmlspecialchars($o['customer_mobile']) ?>"
                                     data-delivery="<?= $isEnabled ? 'enabled' : 'disabled' ?>"
                                     data-locked="<?= $isLocked ? '1' : '0' ?>">
-                                    <td>
+                                    <td data-lbl="Order">
                                         <span class="ao-code">#<?= htmlspecialchars($o['order_code']) ?></span>
                                         <span class="ao-date-cell"><?= date('d M Y, h:i A', strtotime($o['created_at'])) ?></span>
 
                                         <?php if ($oNote !== ''): ?>
-                                            <!-- ✅ Notes shown inline — always visible -->
                                             <div class="ao-inline-note">
                                                 <i class="bi bi-chat-left-text"></i>
                                                 <span class="note-text"><?= htmlspecialchars($oNote) ?></span>
                                             </div>
                                         <?php endif; ?>
                                     </td>
-                                    <td>
+                                    <td data-lbl="Customer">
                                         <span class="ao-name"><?= htmlspecialchars($o['customer_name']) ?></span>
                                         <?php if ($mobile !== '' && $mobile !== '—'): ?>
                                             <a class="ao-phone" href="tel:<?= htmlspecialchars($mobile) ?>">
@@ -929,15 +1366,15 @@ $ordersJson = array_map(function ($o) {
                                             </a>
                                         <?php endif; ?>
                                     </td>
-                                    <td>Division <?= htmlspecialchars($o['division'] ?: '—') ?></td>
-                                    <td><strong>₹<?= number_format((float)$o['total_amount'], 2) ?></strong></td>
-                                    <td>
+                                    <td data-lbl="Division">Division <?= htmlspecialchars($o['division'] ?: '—') ?></td>
+                                    <td data-lbl="Total"><strong>₹<?= number_format((float)$o['total_amount'], 2) ?></strong></td>
+                                    <td data-lbl="Payment">
                                         <span class="ao-pill <?= $isPaid ? 'is-paid' : 'is-unpaid' ?>">
                                             <i class="bi <?= $isPaid ? 'bi-check-circle-fill' : 'bi-x-circle-fill' ?>"></i>
                                             <?= $isPaid ? 'Paid' : 'Unpaid' ?>
                                         </span>
                                     </td>
-                                    <td>
+                                    <td data-lbl="Container">
                                         <?php if (!$hasContainer): ?>
                                             <span class="ao-pill is-disabled" style="background:#f1ece4;color:#948c82;">
                                                 <i class="bi bi-dash-circle"></i> None
@@ -954,7 +1391,7 @@ $ordersJson = array_map(function ($o) {
                                             </span>
                                         <?php endif; ?>
                                     </td>
-                                    <td>
+                                    <td data-lbl="Actions">
                                         <div class="ao-actions">
                                             <button type="button" class="ao-icon-btn js-view" data-id="<?= (int)$o['id'] ?>" title="View details">
                                                 <i class="bi bi-eye"></i>
@@ -1172,7 +1609,7 @@ $ordersJson = array_map(function ($o) {
         })();
     </script>
 
-    <script src="<?= BASE_URL ?>js/apartment-orders.js"></script>
+    <script src="<?= BASE_URL ?>js/apartment-orders.js?v=<?= time() ?>"></script>
 
 </body>
 

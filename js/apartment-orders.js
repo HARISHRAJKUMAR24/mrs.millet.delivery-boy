@@ -1,7 +1,6 @@
 /* =========================================================
    MRS MILL@ — APARTMENT ORDERS (delivery boy)
    File: ./js/apartment-orders.js
-   ** Updated to handle Requests **
    ========================================================= */
 
 (function () {
@@ -62,9 +61,24 @@
     const walletRefreshH = document.getElementById("walletRefreshHistory");
     const walletForm = document.getElementById("walletForm");
 
+    /* Lightbox (house photo / location) */
+    const lightbox = document.getElementById("aoLightbox");
+    const lbClose = document.getElementById("aoLightboxClose");
+    const lbPhotoMode = document.getElementById("aoLbPhotoMode");
+    const lbEmptyMode = document.getElementById("aoLbEmptyMode");
+    const lbLocationMode = document.getElementById("aoLbLocationMode");
+    const lbPhotoImg = document.getElementById("aoLbPhotoImg");
+    const lbLocationAddr = document.getElementById("aoLbLocationAddr");
+    const lbMapLink = document.getElementById("aoLbMapLink");
+    const lbCopyAddr = document.getElementById("aoLbCopyAddr");
+
+    /* Hidden file input for house-photo upload */
+    const photoInput = document.getElementById("housePhotoInput");
+
     let editingContainer = null;
     let walletCustomer = null;
     let walletActiveTab = "credit";
+    let photoCtx = null;
 
     /* ---------- Helpers ---------- */
     function showToast(msg, type) {
@@ -93,6 +107,106 @@
                 timeStyle: "short"
             });
         } catch (e) { return s; }
+    }
+
+    /* =====================================================
+       HOUSE IMAGE POPUP
+       ===================================================== */
+    function openHouseImage(imageUrl) {
+        if (!lightbox || !lbPhotoMode || !lbEmptyMode || !lbLocationMode) {
+            if (imageUrl) window.open(imageUrl, "_blank", "noopener");
+            else showToast("No house photo available.", "error");
+            return;
+        }
+
+        lbPhotoMode.style.display = "none";
+        lbLocationMode.style.display = "none";
+        lbPhotoImg.removeAttribute("src");
+
+        if (imageUrl) {
+            const probe = new Image();
+            probe.onload = function () {
+                lbPhotoImg.src = imageUrl;
+                lbPhotoMode.style.display = "flex";
+                lbEmptyMode.style.display = "none";
+                openLightbox();
+            };
+            probe.onerror = function () {
+                lbPhotoMode.style.display = "none";
+                lbEmptyMode.style.display = "flex";
+                openLightbox();
+            };
+            probe.src = imageUrl;
+        } else {
+            lbPhotoMode.style.display = "none";
+            lbEmptyMode.style.display = "flex";
+            openLightbox();
+        }
+    }
+
+    /* =====================================================
+       LOCATION POPUP
+       ===================================================== */
+    function openLocationPopup(mapUrl, address) {
+        if (!lightbox || !lbLocationMode) {
+            if (mapUrl) window.open(mapUrl, "_blank", "noopener");
+            else showToast("No location available.", "error");
+            return;
+        }
+
+        lbPhotoMode.style.display = "none";
+        lbEmptyMode.style.display = "none";
+        lbLocationMode.style.display = "flex";
+
+        if (lbLocationAddr) lbLocationAddr.textContent = address || "—";
+        if (lbMapLink) lbMapLink.href = mapUrl || "#";
+
+        if (lbCopyAddr) {
+            lbCopyAddr.onclick = function () {
+                if (!address) return;
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(address).then(function () {
+                        showToast("Address copied to clipboard.");
+                    }).catch(function () {
+                        showToast("Could not copy address.", "error");
+                    });
+                } else {
+                    const ta = document.createElement("textarea");
+                    ta.value = address;
+                    document.body.appendChild(ta);
+                    ta.select();
+                    try {
+                        document.execCommand("copy");
+                        showToast("Address copied to clipboard.");
+                    } catch (e) {
+                        showToast("Could not copy address.", "error");
+                    }
+                    document.body.removeChild(ta);
+                }
+            };
+        }
+
+        openLightbox();
+    }
+
+    function openLightbox() {
+        if (!lightbox) return;
+        lightbox.classList.add("show");
+        document.body.style.overflow = "hidden";
+    }
+
+    function closeLightbox() {
+        if (!lightbox) return;
+        lightbox.classList.remove("show");
+        if (lbPhotoImg) lbPhotoImg.removeAttribute("src");
+        document.body.style.overflow = "";
+    }
+
+    if (lbClose) lbClose.addEventListener("click", closeLightbox);
+    if (lightbox) {
+        lightbox.addEventListener("click", function (e) {
+            if (e.target === lightbox) closeLightbox();
+        });
     }
 
     /* ---------- Status tabs ---------- */
@@ -281,18 +395,6 @@
         </div>
     </div>
 
-    ${o.house_image ? `
-        <div class="ao-modal-section">
-            <h4 class="ao-modal-title"><i class="bi bi-image"></i> House Image</h4>
-            <div style="border-radius:12px;overflow:hidden;border:1px solid #f0ebe4;">
-                <img src="${esc(window.MAIN_URL || window.BASE_URL.replace(/delivery-boy\/?$/, 'customer/') || '')}${esc(o.house_image)}"
-                     alt="House"
-                     style="width:100%;max-height:220px;object-fit:cover;display:block;"
-                     onerror="this.style.display='none';this.parentElement.innerHTML='<div style=\\'padding:14px;text-align:center;color:#948c82;font-size:12px;\\'>Image not available</div>';">
-            </div>
-        </div>
-    ` : ''}
-
     ${o.order_note ? `
         <div class="ao-modal-section">
             <h4 class="ao-modal-title"><i class="bi bi-chat-left-text"></i> Order Note</h4>
@@ -373,6 +475,111 @@
     if (amClose) amClose.addEventListener("click", closeModal);
     if (modal) modal.addEventListener("click", e => {
         if (e.target === modal) closeModal();
+    });
+
+    /* =====================================================
+       HOUSE-IMAGE / LOCATION button wiring
+       ===================================================== */
+    document.addEventListener("click", function (e) {
+        const imgBtn = e.target.closest(".js-open-house-photo");
+        if (imgBtn) {
+            const src = imgBtn.dataset.imageSrc || "";
+            openHouseImage(src);
+            return;
+        }
+
+        const locBtn = e.target.closest(".js-open-location");
+        if (locBtn) {
+            const mapUrl = locBtn.dataset.map || "";
+            const address = locBtn.dataset.address || "";
+            openLocationPopup(mapUrl, address);
+            return;
+        }
+    });
+
+    /* =====================================================
+       HOUSE PHOTO UPLOAD / REPLACE / DELETE
+       ===================================================== */
+    function uploadHousePhoto(file) {
+        if (!photoCtx || !file) return;
+
+        const fd = new FormData();
+        fd.append("address", photoCtx.address);
+        fd.append("customer_mobile", photoCtx.mobile);
+        fd.append("customer_name", photoCtx.name);
+        fd.append("action", "upload");
+        fd.append("house_image", file);
+
+        showToast("Uploading photo…");
+
+        fetch(BASE_URL + "ajax/upload-house-photo.php", {
+            method: "POST",
+            body: fd,
+            credentials: "same-origin"
+        })
+            .then(r => r.json().catch(() => null))
+            .then(res => {
+                if (!res || !res.success) {
+                    showToast((res && res.message) || "Upload failed.", "error");
+                    return;
+                }
+                showToast("Photo saved (previous replaced).");
+                setTimeout(() => location.reload(), 800);
+            })
+            .catch(() => showToast("Unable to connect.", "error"));
+    }
+
+    /* Upload button → open picker */
+    document.addEventListener("click", function (e) {
+        const upBtn = e.target.closest(".js-upload-house-photo");
+        if (!upBtn) return;
+
+        photoCtx = {
+            address: upBtn.dataset.address || "",
+            mobile: upBtn.dataset.mobile || "",
+            name: upBtn.dataset.name || ""
+        };
+
+        if (photoInput) {
+            photoInput.value = "";
+            photoInput.click();
+        } else {
+            showToast("Upload input not available.", "error");
+        }
+    });
+
+    /* Picker → upload */
+    if (photoInput) {
+        photoInput.addEventListener("change", function () {
+            const f = this.files && this.files[0];
+            if (f) uploadHousePhoto(f);
+        });
+    }
+
+    /* Delete button */
+    document.addEventListener("click", function (e) {
+        const del = e.target.closest(".js-delete-house-photo");
+        if (!del) return;
+        if (!confirm("Remove the house photo?")) return;
+
+        const fd = new FormData();
+        fd.append("address", del.dataset.address || "");
+        fd.append("customer_mobile", del.dataset.mobile || "");
+        fd.append("action", "delete");
+
+        fetch(BASE_URL + "ajax/upload-house-photo.php", {
+            method: "POST", body: fd, credentials: "same-origin"
+        })
+            .then(r => r.json().catch(() => null))
+            .then(res => {
+                if (!res || !res.success) {
+                    showToast((res && res.message) || "Failed.", "error");
+                    return;
+                }
+                showToast("Photo removed.");
+                setTimeout(() => location.reload(), 700);
+            })
+            .catch(() => showToast("Unable to connect.", "error"));
     });
 
     /* =====================================================
@@ -480,7 +687,7 @@
         document.body.style.overflow = "";
         editingContainer = null;
         containerSubmit.disabled = false;
-        containerSubmitText.textContent = "Request Return"; // updated text
+        containerSubmitText.textContent = "Request Return";
     }
 
     document.addEventListener("click", function (e) {
@@ -627,7 +834,7 @@
         document.body.style.overflow = "";
         walletCustomer = null;
         walletSubmit.disabled = false;
-        walletSubmitText.textContent = "Send Request"; // updated
+        walletSubmitText.textContent = "Send Request";
     }
 
     function loadWalletCustomer(mobile) {
@@ -840,6 +1047,7 @@
         if (modal.classList.contains("show")) closeModal();
         if (containerModal.classList.contains("show")) closeContainerModal();
         if (walletModal && walletModal.classList.contains("show")) closeWalletModal();
+        closeLightbox();
     });
 
 })();
