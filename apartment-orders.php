@@ -86,11 +86,9 @@ try {
     $params = [$aptCode, $boyId];
 
     if ($statusFilter === 'pending') {
-        $sql .= " AND o.delivery_status = 'disabled' AND DATE(o.created_at) = CURDATE()";
+        $sql .= " AND o.delivery_status = 'disabled'";
     } elseif ($statusFilter === 'delivered') {
-        $sql .= " AND o.delivery_status = 'enabled' AND DATE(o.updated_at) = CURDATE()";
-    } else {
-        $sql .= " AND DATE(o.created_at) = CURDATE()";
+        $sql .= " AND o.delivery_status = 'enabled'";
     }
 
     if ($dateFilter !== '') {
@@ -104,14 +102,67 @@ try {
     $stmt->execute($params);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+    /* ---------- Preload house_image + map_link from customer_address_requests ---------- */
+    $requestImages = [];
+    $requestMaps   = [];
+    try {
+        $ri = $pdo->prepare(
+            "SELECT customer_mobile, house_image, map_link
+             FROM customer_address_requests
+             WHERE request_type = 'apartment'
+               AND (requested_apartment = ? OR created_apartment_id = ?)
+             ORDER BY id DESC"
+        );
+        $ri->execute([$apartment['apartment_name'], (int)$apartment['id']]);
+        foreach ($ri->fetchAll(PDO::FETCH_ASSOC) as $rr) {
+            $k = ($rr['customer_mobile'] !== '' ? $rr['customer_mobile'] : '_');
+
+            if (!empty($rr['house_image'])) {
+                if (!isset($requestImages[$k])) $requestImages[$k] = $rr['house_image'];
+                if (!isset($requestImages['_'])) $requestImages['_'] = $rr['house_image'];
+            }
+            if (!empty($rr['map_link'])) {
+                if (!isset($requestMaps[$k])) $requestMaps[$k] = $rr['map_link'];
+                if (!isset($requestMaps['_'])) $requestMaps['_'] = $rr['map_link'];
+            }
+        }
+    } catch (PDOException $e) {
+    }
+
     foreach ($rows as &$r) {
         $addr = json_decode($r['address_json'] ?? '[]', true);
         if (!is_array($addr)) $addr = [];
+
         $r['apartment_name'] = $addr['apartment_name'] ?? ($apartment['apartment_name'] ?? '');
         $r['apartment_code'] = $addr['apartment_code'] ?? ($apartment['apartment_code'] ?? '');
         $r['division']       = $addr['division_label'] ?? '';
-        $r['customer_name']  = $r['customer_name']  ?: '—';
-        $r['customer_mobile'] = $r['customer_mobile'] ?: '—';
+
+        $r['full_address'] = trim(
+            ($r['apartment_name'] ?? '') . ' ' .
+                ($addr['division_label'] ?? '') . ' ' .
+                ($apartment['apartment_address'] ?? '')
+        );
+
+        $mobileRaw = $r['customer_mobile'] ?: '';
+        $mobileKey = $mobileRaw !== '' ? $mobileRaw : '_';
+
+        /* Map link: address_json first, then customer_address_requests */
+        $r['map_link'] = $addr['map_link']
+            ?? $requestMaps[$mobileKey]
+            ?? $requestMaps['_']
+            ?? '';
+
+        /* House image: requests table first, then address_json */
+        $r['house_image'] = $requestImages[$mobileKey]
+            ?? $requestImages['_']
+            ?? ($addr['house_image'] ?? '');
+
+        $r['customer_name']   = $r['customer_name']   ?: '—';
+        $r['customer_mobile'] = $mobileRaw            ?: '—';
+
+        $r['house_image_url'] = $r['house_image'] !== ''
+            ? rtrim(MAIN_URL, '/') . '/' . ltrim($r['house_image'], '/')
+            : '';
     }
     unset($r);
 
@@ -144,7 +195,6 @@ try {
            AND JSON_UNQUOTE(JSON_EXTRACT(o.address_json, '$.apartment_code')) = ?
            AND o.delivery_boy_id = ?
            AND o.status <> 'cancelled'
-           AND DATE(o.created_at) = CURDATE()
          GROUP BY customer_row_id, c.full_name, c.mobile_number
          HAVING SUM(oc.total_containers - oc.received_containers) > 0"
     );
@@ -167,7 +217,9 @@ try {
 } catch (PDOException $e) {
 }
 
-/* Prepare JS payload */
+/* =========================================================
+   JS payload
+   ========================================================= */
 $ordersJson = array_map(function ($o) {
     return [
         'id'                 => (int)$o['id'],
@@ -179,6 +231,10 @@ $ordersJson = array_map(function ($o) {
         'apartment_code'     => $o['apartment_code'],
         'apartment_name'     => $o['apartment_name'],
         'division'           => $o['division'],
+        'full_address'       => $o['full_address'],
+        'map_link'           => $o['map_link'],
+        'house_image'        => $o['house_image'],
+        'house_image_url'    => $o['house_image_url'],
         'division_charge'    => (float)$o['division_charge'],
         'subtotal'           => (float)$o['subtotal'],
         'total_amount'       => (float)$o['total_amount'],
@@ -299,6 +355,7 @@ $ordersJson = array_map(function ($o) {
             border-radius: 10px;
             padding: 3px;
             gap: 3px;
+            flex-wrap: wrap;
         }
 
         .ao-tab {
@@ -444,32 +501,119 @@ $ordersJson = array_map(function ($o) {
             color: #fff;
         }
 
-        .ao-inline-note {
+        .ao-cell-details {
             display: flex;
-            gap: 6px;
+            flex-direction: column;
+            gap: 10px;
+            max-width: 340px;
+            min-width: 260px;
+        }
+
+        .ao-cell-addr {
+            display: flex;
+            gap: 8px;
             align-items: flex-start;
-            margin-top: 8px;
-            padding: 8px 10px;
-            background: #fdf7ec;
-            border: 1px dashed #f3dca5;
-            border-radius: 8px;
-            font-size: 11.5px;
-            color: #6f5a3f;
-            font-weight: 600;
+            font-size: 12px;
+            color: #302923;
+            font-weight: 700;
             line-height: 1.45;
-            max-width: 260px;
+            padding: 10px 12px;
+            background: #f6faf5;
+            border: 1px solid #dbe9d9;
+            border-radius: 10px;
             word-break: break-word;
         }
 
-        .ao-inline-note i {
-            color: #b8893c;
-            font-size: 12px;
+        .ao-cell-addr i {
+            color: #2e7d32;
+            font-size: 14px;
             flex-shrink: 0;
             margin-top: 1px;
         }
 
-        .ao-inline-note .note-text {
+        .ao-cell-addr-text {
             min-width: 0;
+        }
+
+        .ao-cell-note {
+            display: flex;
+            gap: 8px;
+            align-items: flex-start;
+            padding: 8px 12px;
+            background: #fdf7ec;
+            border: 1px dashed #f3dca5;
+            border-radius: 10px;
+            font-size: 11.5px;
+            color: #6f5a3f;
+            font-weight: 600;
+            line-height: 1.45;
+        }
+
+        .ao-cell-note i {
+            color: #b8893c;
+            font-size: 13px;
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+
+        .ao-cell-note-text {
+            min-width: 0;
+        }
+
+        .ao-cell-btns {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-top: 4px;
+        }
+
+        .ao-cell-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            height: 32px;
+            padding: 0 12px;
+            border-radius: 9px;
+            border: 1.5px solid #ece5da;
+            background: #fff;
+            color: #6f675f;
+            font-family: "DM Sans", sans-serif;
+            font-size: 11px;
+            font-weight: 800;
+            cursor: pointer;
+            text-decoration: none;
+            transition: .15s ease;
+            white-space: nowrap;
+        }
+
+        .ao-cell-btn:hover {
+            background: #fdf7ec;
+            color: #b8893c;
+            border-color: #e8d5a8;
+        }
+
+        .ao-cell-btn.map {
+            background: #fbe8e9;
+            color: #b51f2c;
+            border-color: #f0c1c5;
+        }
+
+        .ao-cell-btn.map:hover {
+            background: #b51f2c;
+            color: #fff;
+            border-color: #b51f2c;
+        }
+
+        .ao-cell-btn.image {
+            background: #eef7f0;
+            color: #2e7d32;
+            border-color: #c9e3ce;
+        }
+
+        .ao-cell-btn.image:hover {
+            background: #2e7d32;
+            color: #fff;
+            border-color: #2e7d32;
         }
 
         .ao-pill {
@@ -630,9 +774,6 @@ $ordersJson = array_map(function ($o) {
             margin-bottom: 10px;
         }
 
-        /* =====================================================
-           MODAL + POPUP CONTENT (Desktop)
-           ===================================================== */
         .ao-modal-overlay {
             position: fixed;
             inset: 0;
@@ -722,7 +863,6 @@ $ordersJson = array_map(function ($o) {
             padding: 20px 22px 22px;
         }
 
-        /* --- Popup inner sections --- */
         .ao-modal-section {
             margin-bottom: 18px;
         }
@@ -787,7 +927,6 @@ $ordersJson = array_map(function ($o) {
             font-weight: 800;
         }
 
-        /* Items */
         .ao-products {
             display: flex;
             flex-direction: column;
@@ -850,7 +989,6 @@ $ordersJson = array_map(function ($o) {
             flex-shrink: 0;
         }
 
-        /* Totals */
         .ao-totals {
             border: 1.5px solid #f0ebe4;
             border-radius: 12px;
@@ -889,7 +1027,6 @@ $ordersJson = array_map(function ($o) {
             color: #b51f2c;
         }
 
-        /* Toast */
         .ao-toast {
             position: fixed;
             top: 84px;
@@ -935,10 +1072,401 @@ $ordersJson = array_map(function ($o) {
             }
         }
 
-        /* =====================================================
-           RESPONSIVE — card layout below 900px
-           ===================================================== */
-        @media (max-width: 900px) {
+        .ao-field {
+            margin-bottom: 14px;
+        }
+
+        .ao-field label {
+            display: block;
+            font-size: 11px;
+            font-weight: 800;
+            color: #948c82;
+            text-transform: uppercase;
+            letter-spacing: .06em;
+            margin-bottom: 6px;
+        }
+
+        .ao-field input,
+        .ao-field textarea {
+            width: 100%;
+            border: 1.5px solid #ece5da;
+            background: #fffdf9;
+            border-radius: 9px;
+            padding: 10px 12px;
+            font-family: "DM Sans", sans-serif;
+            font-size: 13px;
+            color: #302923;
+            outline: none;
+        }
+
+        .ao-quick-btns {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+
+        .ao-quick-btn {
+            height: 30px;
+            padding: 0 12px;
+            border-radius: 8px;
+            border: 1.5px solid #ece5da;
+            background: #fff;
+            font-family: "DM Sans", sans-serif;
+            font-size: 11px;
+            font-weight: 800;
+            color: #6f675f;
+            cursor: pointer;
+        }
+
+        .ao-quick-btn:hover {
+            border-color: #b51f2c;
+            color: #b51f2c;
+        }
+
+        .hint {
+            font-size: 11px;
+            color: #948c82;
+            margin-top: 6px;
+            font-weight: 600;
+        }
+
+        .hint.red {
+            color: #b51f2c;
+        }
+
+        .hint.green {
+            color: #1f7a3d;
+        }
+
+        .ao-modal-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+            margin-top: 16px;
+        }
+
+        .ao-modal-btn {
+            height: 38px;
+            padding: 0 16px;
+            border-radius: 10px;
+            border: 0;
+            font-family: "DM Sans", sans-serif;
+            font-size: 12px;
+            font-weight: 800;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .ao-modal-btn.ghost {
+            background: #f7f2ec;
+            color: #6f675f;
+        }
+
+        .ao-modal-btn.primary {
+            background: #b51f2c;
+            color: #fff;
+        }
+
+        .ao-modal-btn.green {
+            background: #1f7a3d;
+            color: #fff;
+        }
+
+        .ao-wallet-balance {
+            background: #fdfaf4;
+            border: 1.5px solid #f0ebe4;
+            border-radius: 12px;
+            padding: 12px 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 14px;
+        }
+
+        .ao-wallet-balance .lbl {
+            font-size: 10px;
+            font-weight: 800;
+            color: #948c82;
+            text-transform: uppercase;
+            letter-spacing: .06em;
+        }
+
+        .ao-wallet-balance .val {
+            font-family: "Playfair Display", serif;
+            font-size: 20px;
+            font-weight: 700;
+            color: #302923;
+            margin-top: 2px;
+        }
+
+        .ao-wallet-tabs {
+            display: flex;
+            gap: 4px;
+            background: #fdfaf4;
+            border: 1.5px solid #ece5da;
+            border-radius: 10px;
+            padding: 3px;
+            margin-bottom: 14px;
+        }
+
+        .ao-wallet-tab {
+            flex: 1;
+            border: 0;
+            background: transparent;
+            padding: 8px;
+            border-radius: 7px;
+            font-family: "DM Sans", sans-serif;
+            font-size: 11.5px;
+            font-weight: 800;
+            color: #6f675f;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+        }
+
+        .ao-wallet-tab.active {
+            background: #fff;
+            color: #b51f2c;
+            box-shadow: 0 3px 8px rgba(48, 41, 35, .08);
+        }
+
+        .ao-history-wrap {
+            border: 1.5px solid #f0ebe4;
+            border-radius: 12px;
+            overflow: auto;
+            max-height: 260px;
+        }
+
+        .ao-history-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11.5px;
+        }
+
+        .ao-history-table th {
+            text-align: left;
+            font-size: 9.5px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: .06em;
+            color: #948c82;
+            background: #fdfaf4;
+            padding: 8px 10px;
+            border-bottom: 1px solid #f0ebe4;
+            white-space: nowrap;
+        }
+
+        .ao-history-table td {
+            padding: 8px 10px;
+            border-bottom: 1px solid #f5efe5;
+        }
+
+        .ao-badge {
+            display: inline-flex;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 9.5px;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+
+        .ao-badge.credit {
+            background: #e7f6ec;
+            color: #1f7a3d;
+        }
+
+        .ao-badge.debit {
+            background: #fbeaea;
+            color: #b51f2c;
+        }
+
+        .ao-amt-credit {
+            color: #1f7a3d;
+            font-weight: 800;
+        }
+
+        .ao-amt-debit {
+            color: #b51f2c;
+            font-weight: 800;
+        }
+
+        .ao-bal-cell {
+            font-weight: 700;
+            color: #302923;
+        }
+
+        .ao-img-preview {
+            position: fixed;
+            inset: 0;
+            z-index: 100000;
+            background: rgba(15, 12, 10, .94);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .ao-img-preview.show {
+            display: flex;
+        }
+
+        .ao-img-preview img {
+            max-width: 92vw;
+            max-height: 80vh;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, .6);
+            object-fit: contain;
+            cursor: default;
+        }
+
+        .ao-img-preview-close {
+            position: absolute;
+            top: 18px;
+            right: 18px;
+            width: 42px;
+            height: 42px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, .15);
+            color: #fff;
+            border: 0;
+            cursor: pointer;
+            font-size: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(6px);
+            transition: .15s ease;
+            z-index: 2;
+        }
+
+        .ao-img-preview-close:hover {
+            background: #b51f2c;
+        }
+
+        .ao-img-preview-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .ao-img-preview-action {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            height: 42px;
+            padding: 0 20px;
+            border-radius: 11px;
+            border: 1.5px solid rgba(255, 255, 255, .25);
+            background: rgba(255, 255, 255, .14);
+            color: #fff;
+            font-family: "DM Sans", sans-serif;
+            font-size: 13px;
+            font-weight: 800;
+            cursor: pointer;
+            backdrop-filter: blur(6px);
+            transition: .15s ease;
+            text-decoration: none;
+        }
+
+        .ao-img-preview-action:hover {
+            background: rgba(255, 255, 255, .24);
+            border-color: rgba(255, 255, 255, .45);
+        }
+
+        .ao-img-preview-action.green {
+            background: #1f7a3d;
+            border-color: #1f7a3d;
+        }
+
+        .ao-img-preview-action.green:hover {
+            background: #2a9a4f;
+            border-color: #2a9a4f;
+        }
+
+        .ao-loc-wrap {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 18px;
+            max-width: 620px;
+            width: 100%;
+            text-align: center;
+        }
+
+        .ao-loc-icon {
+            width: 84px;
+            height: 84px;
+            border-radius: 22px;
+            background: rgba(181, 31, 44, .22);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+            color: #fff;
+            backdrop-filter: blur(6px);
+        }
+
+        .ao-loc-title {
+            color: #fff;
+            font-size: 17px;
+            font-weight: 800;
+            letter-spacing: .02em;
+        }
+
+        .ao-loc-addr {
+            color: rgba(255, 255, 255, .78);
+            font-size: 13px;
+            font-weight: 600;
+            line-height: 1.6;
+            max-width: 480px;
+        }
+
+        .ao-lb-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+            text-align: center;
+            max-width: 380px;
+            padding: 24px;
+        }
+
+        .ao-lb-empty-icon {
+            width: 84px;
+            height: 84px;
+            border-radius: 22px;
+            background: rgba(255, 255, 255, .12);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+            color: #fff;
+            backdrop-filter: blur(6px);
+        }
+
+        .ao-lb-empty-title {
+            color: #fff;
+            font-size: 17px;
+            font-weight: 800;
+            letter-spacing: .02em;
+        }
+
+        .ao-lb-empty-sub {
+            color: rgba(255, 255, 255, .72);
+            font-size: 13px;
+            font-weight: 600;
+            margin-top: 8px;
+            line-height: 1.55;
+        }
+
+        @media (max-width:900px) {
             .ao-page {
                 padding: 16px 12px 32px;
             }
@@ -956,12 +1484,10 @@ $ordersJson = array_map(function ($o) {
                 margin-top: 0;
             }
 
-            /* Hide the native table header */
             .ao-table thead {
                 display: none;
             }
 
-            /* Convert rows into cards */
             .ao-table,
             .ao-table tbody,
             .ao-table tr,
@@ -1000,12 +1526,11 @@ $ordersJson = array_map(function ($o) {
                 margin-bottom: 4px;
             }
 
-            .ao-actions {
-                justify-content: flex-start;
-                margin-top: 6px;
+            .ao-cell-details {
+                max-width: none;
+                min-width: 0;
             }
 
-            /* Order + Customer row side by side within card */
             .ao-table tbody tr {
                 display: grid;
                 grid-template-columns: 1fr 1fr;
@@ -1037,11 +1562,16 @@ $ordersJson = array_map(function ($o) {
             }
 
             .ao-table tbody tr>td:nth-child(7) {
+                grid-column: 2;
+            }
+
+            .ao-table tbody tr>td:nth-child(8) {
                 grid-column: 1 / -1;
             }
 
             .ao-actions {
                 justify-content: flex-start;
+                margin-top: 6px;
             }
 
             .ao-toggle,
@@ -1055,7 +1585,6 @@ $ordersJson = array_map(function ($o) {
                 flex: 0 0 auto;
             }
 
-            /* === MODAL RESPONSIVE === */
             .ao-modal-overlay {
                 padding: 12px;
             }
@@ -1151,7 +1680,7 @@ $ordersJson = array_map(function ($o) {
             }
         }
 
-        @media (max-width: 480px) {
+        @media (max-width:480px) {
             .ao-head {
                 flex-direction: column;
                 align-items: flex-start;
@@ -1182,7 +1711,6 @@ $ordersJson = array_map(function ($o) {
                 flex: 0 0 auto;
             }
 
-            /* === MODAL ULTRA SMALL === */
             .ao-modal-overlay {
                 padding: 8px;
             }
@@ -1221,11 +1749,9 @@ $ordersJson = array_map(function ($o) {
 <body>
 
     <?php include './templates/sidebar.php'; ?>
-
     <div class="sb-overlay" id="sbOverlay"></div>
 
     <div class="main">
-
         <header class="topbar">
             <button class="menu-toggle" id="menuToggle" aria-label="Open menu">
                 <i class="bi bi-list"></i>
@@ -1266,7 +1792,6 @@ $ordersJson = array_map(function ($o) {
 
             <form class="ao-filters" method="GET" id="filterForm">
                 <input type="hidden" name="code" value="<?= htmlspecialchars($aptCode) ?>">
-
                 <div class="ao-filter-group">
                     <span class="ao-filter-lbl">Status</span>
                     <div class="ao-tabs" id="aoTabs">
@@ -1276,19 +1801,12 @@ $ordersJson = array_map(function ($o) {
                     </div>
                     <input type="hidden" name="status" id="statusInput" value="<?= htmlspecialchars($statusFilter) ?>">
                 </div>
-
                 <div class="ao-filter-group">
                     <span class="ao-filter-lbl">Date</span>
-                    <input type="date" name="date" class="ao-date" id="dateInput"
-                        value="<?= htmlspecialchars($dateFilter) ?>">
+                    <input type="date" name="date" class="ao-date" id="dateInput" value="<?= htmlspecialchars($dateFilter) ?>">
                 </div>
-
-                <button type="submit" class="ao-clear-btn" id="applyBtn">
-                    <i class="bi bi-funnel"></i> Apply
-                </button>
-                <a href="?code=<?= urlencode($aptCode) ?>&status=pending" class="ao-clear-btn">
-                    <i class="bi bi-arrow-counterclockwise"></i> Clear
-                </a>
+                <button type="submit" class="ao-clear-btn" id="applyBtn"><i class="bi bi-funnel"></i> Apply</button>
+                <a href="?code=<?= urlencode($aptCode) ?>&status=pending" class="ao-clear-btn"><i class="bi bi-arrow-counterclockwise"></i> Clear</a>
             </form>
 
             <?php if (empty($orders)): ?>
@@ -1311,7 +1829,7 @@ $ordersJson = array_map(function ($o) {
                             <tr>
                                 <th>Order</th>
                                 <th>Customer</th>
-                                <th>Division</th>
+                                <th>Division &amp; Address</th>
                                 <th>Total</th>
                                 <th>Payment</th>
                                 <th>Container</th>
@@ -1340,7 +1858,15 @@ $ordersJson = array_map(function ($o) {
                                     if ($updatedTs && (time() - $updatedTs) > 5 * 3600) $isLocked = true;
                                 }
 
-                                $oNote = trim((string)($o['order_note'] ?? ''));
+                                $oNote     = trim((string)($o['order_note'] ?? ''));
+                                $oMapLink  = $o['map_link'];
+                                $oImage    = $o['house_image_url'];
+                                $oHasImage = $oImage !== '';
+
+                                $mobileSafe = ($o['customer_mobile'] === '—') ? '' : $o['customer_mobile'];
+                                $nameSafe   = $o['customer_name'];
+                                $addrSafe   = $o['full_address'] ?: $apartment['apartment_name'];
+                                $timeCache  = time();
                             ?>
                                 <tr
                                     data-id="<?= (int)$o['id'] ?>"
@@ -1350,13 +1876,6 @@ $ordersJson = array_map(function ($o) {
                                     <td data-lbl="Order">
                                         <span class="ao-code">#<?= htmlspecialchars($o['order_code']) ?></span>
                                         <span class="ao-date-cell"><?= date('d M Y, h:i A', strtotime($o['created_at'])) ?></span>
-
-                                        <?php if ($oNote !== ''): ?>
-                                            <div class="ao-inline-note">
-                                                <i class="bi bi-chat-left-text"></i>
-                                                <span class="note-text"><?= htmlspecialchars($oNote) ?></span>
-                                            </div>
-                                        <?php endif; ?>
                                     </td>
                                     <td data-lbl="Customer">
                                         <span class="ao-name"><?= htmlspecialchars($o['customer_name']) ?></span>
@@ -1366,7 +1885,67 @@ $ordersJson = array_map(function ($o) {
                                             </a>
                                         <?php endif; ?>
                                     </td>
-                                    <td data-lbl="Division">Division <?= htmlspecialchars($o['division'] ?: '—') ?></td>
+
+                                    <td data-lbl="Division & Address">
+                                        <div class="ao-cell-details">
+                                            <?php if (!empty($o['division'])): ?>
+                                                <div style="font-size:11px;font-weight:800;color:#948c82;text-transform:uppercase;letter-spacing:.06em;">
+                                                    Division <?= htmlspecialchars($o['division']) ?>
+                                                </div>
+                                            <?php endif; ?>
+
+                                            <div class="ao-cell-addr">
+                                                <i class="bi bi-geo-alt-fill"></i>
+                                                <div class="ao-cell-addr-text"><?= htmlspecialchars($addrSafe) ?></div>
+                                            </div>
+
+                                            <?php if ($oNote !== ''): ?>
+                                                <div class="ao-cell-note">
+                                                    <i class="bi bi-sticky-fill"></i>
+                                                    <div class="ao-cell-note-text"><?= htmlspecialchars($oNote) ?></div>
+                                                </div>
+                                            <?php endif; ?>
+
+                                            <div class="ao-cell-btns">
+                                                <?php if ($oMapLink !== ''): ?>
+                                                    <button type="button"
+                                                        class="ao-cell-btn map js-open-location"
+                                                        data-order-id="<?= (int)$o['id'] ?>"
+                                                        data-map="<?= htmlspecialchars($oMapLink) ?>"
+                                                        data-address="<?= htmlspecialchars($addrSafe) ?>">
+                                                        <i class="bi bi-geo-alt-fill"></i> Open Location
+                                                    </button>
+                                                <?php endif; ?>
+
+                                                <button type="button"
+                                                    class="ao-cell-btn image js-upload-house-photo"
+                                                    data-address="<?= htmlspecialchars($addrSafe) ?>"
+                                                    data-mobile="<?= htmlspecialchars($mobileSafe) ?>"
+                                                    data-name="<?= htmlspecialchars($nameSafe) ?>"
+                                                    data-has-image="<?= $oHasImage ? '1' : '0' ?>">
+                                                    <i class="bi bi-camera"></i>
+                                                    <?= $oHasImage ? 'Replace Photo' : 'Upload Photo' ?>
+                                                </button>
+
+                                                <?php if ($oHasImage): ?>
+                                                    <button type="button"
+                                                        class="ao-cell-btn image js-open-house-photo"
+                                                        data-order-id="<?= (int)$o['id'] ?>"
+                                                        data-image-src="<?= htmlspecialchars($oImage . '?t=' . $timeCache) ?>">
+                                                        <i class="bi bi-image"></i> View Photo
+                                                    </button>
+
+                                                    <button type="button"
+                                                        class="ao-cell-btn js-delete-house-photo"
+                                                        data-address="<?= htmlspecialchars($addrSafe) ?>"
+                                                        data-mobile="<?= htmlspecialchars($mobileSafe) ?>">
+                                                        <i class="bi bi-trash"></i> Remove
+                                                    </button>
+                                                <?php endif; ?>
+                                            </div>
+                                        </div>
+                                    </td>
+
                                     <td data-lbl="Total"><strong>₹<?= number_format((float)$o['total_amount'], 2) ?></strong></td>
                                     <td data-lbl="Payment">
                                         <span class="ao-pill <?= $isPaid ? 'is-paid' : 'is-unpaid' ?>">
@@ -1573,11 +2152,47 @@ $ordersJson = array_map(function ($o) {
         </div>
     </div>
 
+    <!-- LIGHTBOX -->
+    <div class="ao-img-preview" id="aoLightbox">
+        <button type="button" class="ao-img-preview-close" id="aoLightboxClose"><i class="bi bi-x-lg"></i></button>
+
+        <div id="aoLbPhotoMode" style="display:none;flex-direction:column;align-items:center;gap:16px;">
+            <img src="" alt="House Preview" id="aoLbPhotoImg">
+        </div>
+
+        <div id="aoLbEmptyMode" class="ao-lb-empty" style="display:none;">
+            <div class="ao-lb-empty-icon"><i class="bi bi-image"></i></div>
+            <div>
+                <div class="ao-lb-empty-title">No House Photo</div>
+                <div class="ao-lb-empty-sub">No photo is available for this house.</div>
+            </div>
+        </div>
+
+        <div id="aoLbLocationMode" class="ao-loc-wrap" style="display:none;">
+            <div class="ao-loc-icon"><i class="bi bi-geo-alt-fill"></i></div>
+            <div class="ao-loc-title">Delivery Location</div>
+            <div class="ao-loc-addr" id="aoLbLocationAddr"></div>
+            <div class="ao-img-preview-actions">
+                <a href="#" target="_blank" rel="noopener noreferrer" class="ao-img-preview-action green" id="aoLbMapLink">
+                    <i class="bi bi-geo-alt-fill"></i> Open in Maps
+                </a>
+                <button type="button" class="ao-img-preview-action" id="aoLbCopyAddr">
+                    <i class="bi bi-clipboard"></i> Copy Address
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden file input for house photo upload -->
+    <input type="file" id="housePhotoInput" accept="image/jpeg,image/png,image/webp"
+        style="position:fixed;left:-9999px;top:-9999px;opacity:0;width:1px;height:1px;pointer-events:none;">
+
     <div class="ao-toast" id="aoToast"></div>
 
     <script>
         window.BASE_URL = "<?= BASE_URL ?>";
         window.ADMIN_URL = "<?= ADMIN_URL ?>";
+        window.MAIN_URL = "<?= MAIN_URL ?>";
         window.ORDERS = <?= json_encode($ordersJson, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>;
         window.CURRENT_STATUS = "<?= htmlspecialchars($statusFilter) ?>";
         window.CONTAINER_SUMMARY = <?= json_encode($containerSummary, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>;
