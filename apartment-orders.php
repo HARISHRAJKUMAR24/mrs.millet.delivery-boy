@@ -46,6 +46,37 @@ if (!$apartment) {
     exit;
 }
 
+/* ---------------- ACTIVE MENUS ---------------- */
+$activeMenus = [];
+try {
+    $mStmt = $pdo->query(
+        "SELECT menu_code, menu_name, start_at, end_at
+         FROM menus
+         WHERE status = 1
+           AND start_at <= NOW()
+           AND end_at   >= NOW()
+         ORDER BY id DESC"
+    );
+    $activeMenus = $mStmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+}
+
+/* Selected menu (default = latest active) */
+$selectedMenuCode = trim($_GET['menu'] ?? '');
+$selectedMenu     = null;
+
+if ($selectedMenuCode !== '') {
+    foreach ($activeMenus as $m) {
+        if ($m['menu_code'] === $selectedMenuCode) {
+            $selectedMenu = $m;
+            break;
+        }
+    }
+}
+if (!$selectedMenu && !empty($activeMenus)) {
+    $selectedMenu = $activeMenus[0];
+}
+
 /* ---------------- FILTERS ---------------- */
 $statusFilter = trim($_GET['status'] ?? 'pending');
 $dateFilter   = trim($_GET['date']   ?? '');
@@ -84,6 +115,13 @@ try {
               AND o.status <> 'cancelled'";
 
     $params = [$aptCode, $boyId];
+
+    /* Filter by selected active menu's date window */
+    if ($selectedMenu) {
+        $sql .= " AND o.created_at BETWEEN ? AND ?";
+        $params[] = $selectedMenu['start_at'];
+        $params[] = $selectedMenu['end_at'];
+    }
 
     if ($statusFilter === 'pending') {
         $sql .= " AND o.delivery_status = 'disabled'";
@@ -146,13 +184,11 @@ try {
         $mobileRaw = $r['customer_mobile'] ?: '';
         $mobileKey = $mobileRaw !== '' ? $mobileRaw : '_';
 
-        /* Map link: address_json first, then customer_address_requests */
         $r['map_link'] = $addr['map_link']
             ?? $requestMaps[$mobileKey]
             ?? $requestMaps['_']
             ?? '';
 
-        /* House image: requests table first, then address_json */
         $r['house_image'] = $requestImages[$mobileKey]
             ?? $requestImages['_']
             ?? ($addr['house_image'] ?? '');
@@ -176,8 +212,7 @@ try {
    ========================================================= */
 $containerSummary = [];
 try {
-    $sumStmt = $pdo->prepare(
-        "SELECT
+    $sumSql = "SELECT
             COALESCE(oc.customer_id,
                      (SELECT c2.id FROM customers c2 WHERE c2.customer_id = o.customer_id LIMIT 1)
             ) AS customer_row_id,
@@ -194,11 +229,21 @@ try {
          WHERE JSON_VALID(o.address_json)
            AND JSON_UNQUOTE(JSON_EXTRACT(o.address_json, '$.apartment_code')) = ?
            AND o.delivery_boy_id = ?
-           AND o.status <> 'cancelled'
-         GROUP BY customer_row_id, c.full_name, c.mobile_number
-         HAVING SUM(oc.total_containers - oc.received_containers) > 0"
-    );
-    $sumStmt->execute([$aptCode, $boyId]);
+           AND o.status <> 'cancelled'";
+
+    $sumParams = [$aptCode, $boyId];
+
+    if ($selectedMenu) {
+        $sumSql .= " AND o.created_at BETWEEN ? AND ?";
+        $sumParams[] = $selectedMenu['start_at'];
+        $sumParams[] = $selectedMenu['end_at'];
+    }
+
+    $sumSql .= " GROUP BY customer_row_id, c.full_name, c.mobile_number
+                 HAVING SUM(oc.total_containers - oc.received_containers) > 0";
+
+    $sumStmt = $pdo->prepare($sumSql);
+    $sumStmt->execute($sumParams);
     $rows = $sumStmt->fetchAll(PDO::FETCH_ASSOC);
 
     foreach ($rows as $r) {
@@ -393,6 +438,26 @@ $ordersJson = array_map(function ($o) {
             color: #302923;
             outline: none;
             cursor: pointer;
+        }
+
+        .ao-menu-select {
+            height: 36px;
+            border: 1.5px solid #ece5da;
+            background: #fffdf9;
+            border-radius: 9px;
+            padding: 0 12px;
+            font-family: "DM Sans", sans-serif;
+            font-size: 12px;
+            font-weight: 700;
+            color: #302923;
+            outline: none;
+            cursor: pointer;
+            min-width: 180px;
+        }
+
+        .ao-menu-select:focus {
+            border-color: #b51f2c;
+            box-shadow: 0 0 0 3px rgba(181, 31, 44, .08);
         }
 
         .ao-clear-btn {
@@ -1565,10 +1630,6 @@ $ordersJson = array_map(function ($o) {
                 grid-column: 2;
             }
 
-            .ao-table tbody tr>td:nth-child(8) {
-                grid-column: 1 / -1;
-            }
-
             .ao-actions {
                 justify-content: flex-start;
                 margin-top: 6px;
@@ -1785,6 +1846,11 @@ $ordersJson = array_map(function ($o) {
                             <?php if (!empty($apartment['apartment_address'])): ?>
                                 · <?= htmlspecialchars($apartment['apartment_address']) ?>
                             <?php endif; ?>
+                            <?php if ($selectedMenu): ?>
+                                · <span style="color:#b51f2c;font-weight:700;">
+                                    <?= htmlspecialchars($selectedMenu['menu_name']) ?>
+                                </span>
+                            <?php endif; ?>
                         </p>
                     </div>
                 </div>
@@ -1792,6 +1858,22 @@ $ordersJson = array_map(function ($o) {
 
             <form class="ao-filters" method="GET" id="filterForm">
                 <input type="hidden" name="code" value="<?= htmlspecialchars($aptCode) ?>">
+
+                <?php if (!empty($activeMenus)): ?>
+                    <div class="ao-filter-group">
+                        <span class="ao-filter-lbl">Menu</span>
+                        <select name="menu" class="ao-menu-select"
+                            onchange="document.getElementById('filterForm').submit()">
+                            <?php foreach ($activeMenus as $m): ?>
+                                <option value="<?= htmlspecialchars($m['menu_code']) ?>"
+                                    <?= $selectedMenu && $selectedMenu['menu_code'] === $m['menu_code'] ? 'selected' : '' ?>>
+                                    <?= htmlspecialchars($m['menu_name']) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                <?php endif; ?>
+
                 <div class="ao-filter-group">
                     <span class="ao-filter-lbl">Status</span>
                     <div class="ao-tabs" id="aoTabs">
@@ -1801,10 +1883,12 @@ $ordersJson = array_map(function ($o) {
                     </div>
                     <input type="hidden" name="status" id="statusInput" value="<?= htmlspecialchars($statusFilter) ?>">
                 </div>
+
                 <div class="ao-filter-group">
                     <span class="ao-filter-lbl">Date</span>
                     <input type="date" name="date" class="ao-date" id="dateInput" value="<?= htmlspecialchars($dateFilter) ?>">
                 </div>
+
                 <button type="submit" class="ao-clear-btn" id="applyBtn"><i class="bi bi-funnel"></i> Apply</button>
                 <a href="?code=<?= urlencode($aptCode) ?>&status=pending" class="ao-clear-btn"><i class="bi bi-arrow-counterclockwise"></i> Clear</a>
             </form>
@@ -1813,7 +1897,9 @@ $ordersJson = array_map(function ($o) {
                 <div class="ao-table-wrap">
                     <div class="ao-empty">
                         <i class="bi bi-inbox"></i>
-                        <?php if ($statusFilter === 'pending' && $dateFilter === ''): ?>
+                        <?php if (empty($activeMenus)): ?>
+                            No menu is live right now.
+                        <?php elseif ($statusFilter === 'pending' && $dateFilter === ''): ?>
                             No pending orders right now.
                         <?php elseif ($statusFilter === 'delivered'): ?>
                             No delivered orders match your filter.
@@ -2002,12 +2088,17 @@ $ordersJson = array_map(function ($o) {
                                                 </button>
                                             <?php endif; ?>
 
-                                            <?php if (!empty($o['customer_mobile']) && $o['customer_mobile'] !== '—'): ?>
+                                            <?php
+                                            $walletMobile = ($o['customer_mobile'] !== '—') ? $o['customer_mobile'] : '';
+                                            $walletName   = $o['customer_name']   !== '—' ? $o['customer_name']   : '';
+                                            $showWallet   = ($walletMobile !== '' || $walletName !== '');
+                                            ?>
+                                            <?php if ($showWallet): ?>
                                                 <button type="button"
                                                     class="ao-mini-btn wallet js-wallet"
                                                     data-id="<?= (int)$o['id'] ?>"
-                                                    data-mobile="<?= htmlspecialchars($o['customer_mobile']) ?>"
-                                                    data-name="<?= htmlspecialchars($o['customer_name']) ?>">
+                                                    data-mobile="<?= htmlspecialchars($walletMobile) ?>"
+                                                    data-name="<?= htmlspecialchars($walletName) ?>">
                                                     <i class="bi bi-wallet2"></i> Wallet
                                                 </button>
                                             <?php endif; ?>

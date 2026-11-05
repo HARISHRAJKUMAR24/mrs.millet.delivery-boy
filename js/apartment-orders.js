@@ -792,10 +792,10 @@
        WALLET MODAL
        ===================================================== */
     function openWalletModal(mobile, name) {
-        if (!mobile) return;
+        if (!mobile && !name) return;
 
-        walletMobileInp.value = mobile;
-        walletModalSub.textContent = (name || "Customer") + " · " + mobile;
+        walletMobileInp.value = mobile || "";
+        walletModalSub.textContent = (name || "Customer") + (mobile ? " · " + mobile : "");
 
         walletModalInfo.innerHTML = `
             <div class="ao-info-row">
@@ -804,7 +804,7 @@
             </div>
             <div class="ao-info-row">
                 <span class="lbl">Mobile</span>
-                <span class="val">${esc(mobile)}</span>
+                <span class="val">${esc(mobile || "—")}</span>
             </div>
         `;
 
@@ -825,7 +825,24 @@
         document.body.style.overflow = "hidden";
         setTimeout(() => walletAmount.focus(), 100);
 
-        loadWalletCustomer(mobile);
+        if (mobile) {
+            loadWalletCustomer(mobile, name);
+        } else {
+            walletCustomer = {
+                id: 0,
+                name: name || "",
+                mobile: "",
+                wallet_balance: 0,
+                not_found: true
+            };
+            walletBalanceEl.textContent = "₹0";
+            walletStatusLbl.textContent = "No mobile on file";
+            updateWalletPreview();
+            walletHistory.innerHTML =
+                `<div style="padding:24px;text-align:center;color:#948c82;font-size:11.5px;">
+                    No mobile number on record.
+                 </div>`;
+        }
     }
 
     function closeWalletModal() {
@@ -837,21 +854,35 @@
         walletSubmitText.textContent = "Send Request";
     }
 
-    function loadWalletCustomer(mobile) {
+    function loadWalletCustomer(mobile, fallbackName) {
         fetch(BASE_URL + "ajax/wallet-lookup.php?mobile=" + encodeURIComponent(mobile), {
             credentials: "same-origin"
         })
             .then(r => r.json().catch(() => null))
             .then(res => {
-                if (!res || !res.success || !res.data || !res.data.found) {
+                const found = !!(res && res.success && res.data && res.data.found);
+
+                if (!found) {
+                    walletCustomer = {
+                        id: 0,
+                        name: fallbackName || "",
+                        mobile: mobile,
+                        wallet_balance: 0,
+                        not_found: true
+                    };
                     walletBalanceEl.textContent = "₹0";
-                    walletStatusLbl.textContent = "Not found";
-                    walletCustomer = null;
+                    walletStatusLbl.textContent = "No wallet yet";
+                    updateWalletPreview();
+                    walletHistory.innerHTML =
+                        `<div style="padding:24px;text-align:center;color:#948c82;font-size:11.5px;">
+                            No wallet yet — send a request to activate it.
+                         </div>`;
                     return;
                 }
+
                 walletCustomer = {
                     id: res.data.id || 0,
-                    name: res.data.name || "",
+                    name: res.data.name || fallbackName || "",
                     mobile: res.data.mobile || mobile,
                     wallet_balance: Number(res.data.wallet_balance || 0)
                 };
@@ -861,6 +892,13 @@
                 loadWalletHistory(mobile);
             })
             .catch(() => {
+                walletCustomer = {
+                    id: 0,
+                    name: fallbackName || "",
+                    mobile: mobile,
+                    wallet_balance: 0,
+                    not_found: true
+                };
                 walletBalanceEl.textContent = "₹0";
                 walletStatusLbl.textContent = "Error";
             });
@@ -901,7 +939,7 @@
     });
 
     function submitWallet() {
-        if (!walletCustomer || !walletCustomer.id) {
+        if (!walletCustomer) {
             showToast("Customer wallet not loaded.", "error");
             return;
         }
@@ -923,7 +961,14 @@
         walletSubmitText.innerHTML = '<span class="btn-spinner"></span> Sending…';
 
         const fd = new FormData();
-        fd.append("customer_id", walletCustomer.id);
+
+        if (walletCustomer.id > 0) {
+            fd.append("customer_id", walletCustomer.id);
+        } else {
+            fd.append("customer_mobile", walletCustomer.mobile || "");
+            fd.append("customer_name", walletCustomer.name || "");
+        }
+
         fd.append("txn_type", walletActiveTab);
         fd.append("amount", amt);
         fd.append("note", note);
@@ -945,7 +990,10 @@
 
                 walletAmount.value = "";
                 walletNote.value = "";
-                updateWalletPreview();
+
+                if (walletCustomer.id <= 0 && walletCustomer.mobile) {
+                    setTimeout(() => loadWalletCustomer(walletCustomer.mobile, walletCustomer.name), 500);
+                }
             })
             .catch(() => {
                 walletSubmit.disabled = false;

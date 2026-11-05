@@ -31,6 +31,35 @@ if ($addressRaw === '') {
 }
 $address = $addressRaw;
 
+/* ---------------- ACTIVE MENUS ---------------- */
+$activeMenus = [];
+try {
+    $mStmt = $pdo->query(
+        "SELECT menu_code, menu_name, start_at, end_at
+         FROM menus
+         WHERE status = 1
+           AND start_at <= NOW()
+           AND end_at   >= NOW()
+         ORDER BY id DESC"
+    );
+    $activeMenus = $mStmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+}
+
+$selectedMenuCode = trim($_GET['menu'] ?? '');
+$selectedMenu     = null;
+if ($selectedMenuCode !== '') {
+    foreach ($activeMenus as $m) {
+        if ($m['menu_code'] === $selectedMenuCode) {
+            $selectedMenu = $m;
+            break;
+        }
+    }
+}
+if (!$selectedMenu && !empty($activeMenus)) {
+    $selectedMenu = $activeMenus[0];
+}
+
 /* ---------------- FILTERS ---------------- */
 $statusFilter = trim($_GET['status'] ?? 'pending');
 $dateFilter   = trim($_GET['date']   ?? '');
@@ -72,6 +101,13 @@ try {
               AND o.status <> 'cancelled'";
 
     $params = [$address, $boyId];
+
+    /* Filter by selected active menu's date window */
+    if ($selectedMenu) {
+        $sql .= " AND o.created_at BETWEEN ? AND ?";
+        $params[] = $selectedMenu['start_at'];
+        $params[] = $selectedMenu['end_at'];
+    }
 
     if ($statusFilter === 'pending') {
         $sql .= " AND o.delivery_status = 'disabled'";
@@ -146,8 +182,7 @@ try {
    ========================================================= */
 $containerSummary = [];
 try {
-    $sumStmt = $pdo->prepare(
-        "SELECT
+    $sumSql = "SELECT
             COALESCE(oc.customer_id,
                      (SELECT c2.id FROM customers c2 WHERE c2.customer_id = o.customer_id LIMIT 1)
             ) AS customer_row_id,
@@ -165,11 +200,21 @@ try {
            AND o.address_type = 'individual_house'
            AND JSON_UNQUOTE(JSON_EXTRACT(o.address_json, '$.full_address')) = ?
            AND o.delivery_boy_id = ?
-           AND o.status <> 'cancelled'
-         GROUP BY customer_row_id, c.full_name, c.mobile_number
-         HAVING SUM(oc.total_containers - oc.received_containers) > 0"
-    );
-    $sumStmt->execute([$address, $boyId]);
+           AND o.status <> 'cancelled'";
+
+    $sumParams = [$address, $boyId];
+
+    if ($selectedMenu) {
+        $sumSql .= " AND o.created_at BETWEEN ? AND ?";
+        $sumParams[] = $selectedMenu['start_at'];
+        $sumParams[] = $selectedMenu['end_at'];
+    }
+
+    $sumSql .= " GROUP BY customer_row_id, c.full_name, c.mobile_number
+                 HAVING SUM(oc.total_containers - oc.received_containers) > 0";
+
+    $sumStmt = $pdo->prepare($sumSql);
+    $sumStmt->execute($sumParams);
     $rows = $sumStmt->fetchAll(PDO::FETCH_ASSOC);
 
     foreach ($rows as $r) {
@@ -365,6 +410,26 @@ $ordersJson = array_map(function ($o) {
             color: #302923;
             outline: none;
             cursor: pointer;
+        }
+
+        .ao-menu-select {
+            height: 36px;
+            border: 1.5px solid #ece5da;
+            background: #fffdf9;
+            border-radius: 9px;
+            padding: 0 12px;
+            font-family: "DM Sans", sans-serif;
+            font-size: 12px;
+            font-weight: 700;
+            color: #302923;
+            outline: none;
+            cursor: pointer;
+            min-width: 180px;
+        }
+
+        .ao-menu-select:focus {
+            border-color: #b51f2c;
+            box-shadow: 0 0 0 3px rgba(181, 31, 44, .08);
         }
 
         .ao-clear-btn {
@@ -725,9 +790,6 @@ $ordersJson = array_map(function ($o) {
             margin-bottom: 10px;
         }
 
-        /* =====================================================
-           MODAL + POPUP CONTENT (Desktop)
-           ===================================================== */
         .ao-modal-overlay {
             position: fixed;
             inset: 0;
@@ -817,7 +879,6 @@ $ordersJson = array_map(function ($o) {
             padding: 20px 22px 22px;
         }
 
-        /* --- Popup inner sections --- */
         .ao-modal-section {
             margin-bottom: 18px;
         }
@@ -882,7 +943,6 @@ $ordersJson = array_map(function ($o) {
             font-weight: 800;
         }
 
-        /* Items */
         .ao-products {
             display: flex;
             flex-direction: column;
@@ -945,7 +1005,6 @@ $ordersJson = array_map(function ($o) {
             flex-shrink: 0;
         }
 
-        /* Totals */
         .ao-totals {
             border: 1.5px solid #f0ebe4;
             border-radius: 12px;
@@ -984,7 +1043,6 @@ $ordersJson = array_map(function ($o) {
             color: #b51f2c;
         }
 
-        /* Toast & Spinner */
         .ao-toast {
             position: fixed;
             top: 84px;
@@ -1030,7 +1088,234 @@ $ordersJson = array_map(function ($o) {
             }
         }
 
-        /* Lightbox */
+        .ao-field {
+            margin-bottom: 14px;
+        }
+
+        .ao-field label {
+            display: block;
+            font-size: 11px;
+            font-weight: 800;
+            color: #948c82;
+            text-transform: uppercase;
+            letter-spacing: .06em;
+            margin-bottom: 6px;
+        }
+
+        .ao-field input,
+        .ao-field textarea {
+            width: 100%;
+            border: 1.5px solid #ece5da;
+            background: #fffdf9;
+            border-radius: 9px;
+            padding: 10px 12px;
+            font-family: "DM Sans", sans-serif;
+            font-size: 13px;
+            color: #302923;
+            outline: none;
+        }
+
+        .ao-quick-btns {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+
+        .ao-quick-btn {
+            height: 30px;
+            padding: 0 12px;
+            border-radius: 8px;
+            border: 1.5px solid #ece5da;
+            background: #fff;
+            font-family: "DM Sans", sans-serif;
+            font-size: 11px;
+            font-weight: 800;
+            color: #6f675f;
+            cursor: pointer;
+        }
+
+        .ao-quick-btn:hover {
+            border-color: #b51f2c;
+            color: #b51f2c;
+        }
+
+        .hint {
+            font-size: 11px;
+            color: #948c82;
+            margin-top: 6px;
+            font-weight: 600;
+        }
+
+        .hint.red {
+            color: #b51f2c;
+        }
+
+        .hint.green {
+            color: #1f7a3d;
+        }
+
+        .ao-modal-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+            margin-top: 16px;
+        }
+
+        .ao-modal-btn {
+            height: 38px;
+            padding: 0 16px;
+            border-radius: 10px;
+            border: 0;
+            font-family: "DM Sans", sans-serif;
+            font-size: 12px;
+            font-weight: 800;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .ao-modal-btn.ghost {
+            background: #f7f2ec;
+            color: #6f675f;
+        }
+
+        .ao-modal-btn.primary {
+            background: #b51f2c;
+            color: #fff;
+        }
+
+        .ao-modal-btn.green {
+            background: #1f7a3d;
+            color: #fff;
+        }
+
+        .ao-wallet-balance {
+            background: #fdfaf4;
+            border: 1.5px solid #f0ebe4;
+            border-radius: 12px;
+            padding: 12px 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 14px;
+        }
+
+        .ao-wallet-balance .lbl {
+            font-size: 10px;
+            font-weight: 800;
+            color: #948c82;
+            text-transform: uppercase;
+            letter-spacing: .06em;
+        }
+
+        .ao-wallet-balance .val {
+            font-family: "Playfair Display", serif;
+            font-size: 20px;
+            font-weight: 700;
+            color: #302923;
+            margin-top: 2px;
+        }
+
+        .ao-wallet-tabs {
+            display: flex;
+            gap: 4px;
+            background: #fdfaf4;
+            border: 1.5px solid #ece5da;
+            border-radius: 10px;
+            padding: 3px;
+            margin-bottom: 14px;
+        }
+
+        .ao-wallet-tab {
+            flex: 1;
+            border: 0;
+            background: transparent;
+            padding: 8px;
+            border-radius: 7px;
+            font-family: "DM Sans", sans-serif;
+            font-size: 11.5px;
+            font-weight: 800;
+            color: #6f675f;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+        }
+
+        .ao-wallet-tab.active {
+            background: #fff;
+            color: #b51f2c;
+            box-shadow: 0 3px 8px rgba(48, 41, 35, .08);
+        }
+
+        .ao-history-wrap {
+            border: 1.5px solid #f0ebe4;
+            border-radius: 12px;
+            overflow: auto;
+            max-height: 260px;
+        }
+
+        .ao-history-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11.5px;
+        }
+
+        .ao-history-table th {
+            text-align: left;
+            font-size: 9.5px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: .06em;
+            color: #948c82;
+            background: #fdfaf4;
+            padding: 8px 10px;
+            border-bottom: 1px solid #f0ebe4;
+            white-space: nowrap;
+        }
+
+        .ao-history-table td {
+            padding: 8px 10px;
+            border-bottom: 1px solid #f5efe5;
+        }
+
+        .ao-badge {
+            display: inline-flex;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 9.5px;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+
+        .ao-badge.credit {
+            background: #e7f6ec;
+            color: #1f7a3d;
+        }
+
+        .ao-badge.debit {
+            background: #fbeaea;
+            color: #b51f2c;
+        }
+
+        .ao-amt-credit {
+            color: #1f7a3d;
+            font-weight: 800;
+        }
+
+        .ao-amt-debit {
+            color: #b51f2c;
+            font-weight: 800;
+        }
+
+        .ao-bal-cell {
+            font-weight: 700;
+            color: #302923;
+        }
+
         .ao-img-preview {
             position: fixed;
             inset: 0;
@@ -1197,10 +1482,7 @@ $ordersJson = array_map(function ($o) {
             line-height: 1.55;
         }
 
-        /* =====================================================
-           RESPONSIVE — card layout below 900px
-           ===================================================== */
-        @media (max-width: 900px) {
+        @media (max-width:900px) {
             .ao-page {
                 padding: 16px 12px 32px;
             }
@@ -1218,12 +1500,10 @@ $ordersJson = array_map(function ($o) {
                 margin-top: 0;
             }
 
-            /* Hide the native table header */
             .ao-table thead {
                 display: none;
             }
 
-            /* Convert rows into cards */
             .ao-table,
             .ao-table tbody,
             .ao-table tr,
@@ -1251,7 +1531,6 @@ $ordersJson = array_map(function ($o) {
                 text-align: left;
             }
 
-            /* Add mobile labels via data-lbl */
             .ao-table tbody td[data-lbl]::before {
                 content: attr(data-lbl);
                 display: block;
@@ -1263,18 +1542,11 @@ $ordersJson = array_map(function ($o) {
                 margin-bottom: 4px;
             }
 
-            /* Tighten card contents */
             .ao-cell-details {
                 max-width: none;
                 min-width: 0;
             }
 
-            .ao-actions {
-                justify-content: flex-start;
-                margin-top: 6px;
-            }
-
-            /* Order + Customer row side by side within card */
             .ao-table tbody tr {
                 display: grid;
                 grid-template-columns: 1fr 1fr;
@@ -1306,11 +1578,16 @@ $ordersJson = array_map(function ($o) {
             }
 
             .ao-table tbody tr>td:nth-child(7) {
+                grid-column: 2;
+            }
+
+            .ao-table tbody tr>td:nth-child(8) {
                 grid-column: 1 / -1;
             }
 
             .ao-actions {
                 justify-content: flex-start;
+                margin-top: 6px;
             }
 
             .ao-toggle,
@@ -1324,7 +1601,6 @@ $ordersJson = array_map(function ($o) {
                 flex: 0 0 auto;
             }
 
-            /* === MODAL RESPONSIVE === */
             .ao-modal-overlay {
                 padding: 12px;
             }
@@ -1420,7 +1696,7 @@ $ordersJson = array_map(function ($o) {
             }
         }
 
-        @media (max-width: 480px) {
+        @media (max-width:480px) {
             .ao-head {
                 flex-direction: column;
                 align-items: flex-start;
@@ -1451,7 +1727,6 @@ $ordersJson = array_map(function ($o) {
                 flex: 0 0 auto;
             }
 
-            /* === MODAL ULTRA SMALL === */
             .ao-modal-overlay {
                 padding: 8px;
             }
@@ -1490,11 +1765,9 @@ $ordersJson = array_map(function ($o) {
 <body>
 
     <?php include './templates/sidebar.php'; ?>
-
     <div class="sb-overlay" id="sbOverlay"></div>
 
     <div class="main">
-
         <header class="topbar">
             <button class="menu-toggle" id="menuToggle" aria-label="Open menu">
                 <i class="bi bi-list"></i>
@@ -1514,7 +1787,6 @@ $ordersJson = array_map(function ($o) {
         </header>
 
         <main class="ao-page">
-
             <a href="<?= BASE_URL ?>delivery-orders.php" class="ao-back">
                 <i class="bi bi-arrow-left"></i> Back to My Deliveries
             </a>
@@ -1524,13 +1796,35 @@ $ordersJson = array_map(function ($o) {
                     <div class="ao-head-icon"><i class="bi bi-house-door"></i></div>
                     <div>
                         <h1>Individual House Orders</h1>
-                        <p>Delivery Boy: <?= htmlspecialchars($boy['full_name']) ?></p>
+                        <p>
+                            Delivery Boy: <?= htmlspecialchars($boy['full_name']) ?>
+                            <?php if ($selectedMenu): ?>
+                                · <span style="color:#b51f2c;font-weight:700;">
+                                    <?= htmlspecialchars($selectedMenu['menu_name']) ?>
+                                </span>
+                            <?php endif; ?>
+                        </p>
                     </div>
                 </div>
             </div>
 
             <form class="ao-filters" method="GET" id="filterForm">
                 <input type="hidden" name="address" value="<?= htmlspecialchars($address) ?>">
+
+                <?php if (!empty($activeMenus)): ?>
+                    <div class="ao-filter-group">
+                        <span class="ao-filter-lbl">Menu</span>
+                        <select name="menu" class="ao-menu-select"
+                            onchange="document.getElementById('filterForm').submit()">
+                            <?php foreach ($activeMenus as $m): ?>
+                                <option value="<?= htmlspecialchars($m['menu_code']) ?>"
+                                    <?= $selectedMenu && $selectedMenu['menu_code'] === $m['menu_code'] ? 'selected' : '' ?>>
+                                    <?= htmlspecialchars($m['menu_name']) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                <?php endif; ?>
 
                 <div class="ao-filter-group">
                     <span class="ao-filter-lbl">Status</span>
@@ -1544,23 +1838,22 @@ $ordersJson = array_map(function ($o) {
 
                 <div class="ao-filter-group">
                     <span class="ao-filter-lbl">Date</span>
-                    <input type="date" name="date" class="ao-date" id="dateInput"
-                        value="<?= htmlspecialchars($dateFilter) ?>">
+                    <input type="date" name="date" class="ao-date" id="dateInput" value="<?= htmlspecialchars($dateFilter) ?>">
                 </div>
 
-                <button type="submit" class="ao-clear-btn">
-                    <i class="bi bi-funnel"></i> Apply
-                </button>
-                <a href="?address=<?= urlencode($address) ?>&status=pending" class="ao-clear-btn">
-                    <i class="bi bi-arrow-counterclockwise"></i> Clear
-                </a>
+                <button type="submit" class="ao-clear-btn"><i class="bi bi-funnel"></i> Apply</button>
+                <a href="?address=<?= urlencode($address) ?>&status=pending" class="ao-clear-btn"><i class="bi bi-arrow-counterclockwise"></i> Clear</a>
             </form>
 
             <?php if (empty($orders)): ?>
                 <div class="ao-table-wrap">
                     <div class="ao-empty">
                         <i class="bi bi-inbox"></i>
-                        No orders match your filter.
+                        <?php if (empty($activeMenus)): ?>
+                            No menu is live right now.
+                        <?php else: ?>
+                            No orders match your filter.
+                        <?php endif; ?>
                     </div>
                 </div>
             <?php else: ?>
@@ -1607,8 +1900,10 @@ $ordersJson = array_map(function ($o) {
                                 $timeCache   = time();
 
                                 $mobileSafe  = ($o['customer_mobile'] === '—') ? '' : $o['customer_mobile'];
-                                $nameSafe    = $o['customer_name'];
+                                $nameSafe    = $o['customer_name'] !== '—' ? $o['customer_name'] : '';
                                 $addrSafe    = $o['full_address'] ?: $address;
+
+                                $showWallet  = ($mobileSafe !== '' || $nameSafe !== '');
                             ?>
                                 <tr
                                     data-id="<?= $oId ?>"
@@ -1630,12 +1925,9 @@ $ordersJson = array_map(function ($o) {
 
                                     <td data-lbl="Address & Notes">
                                         <div class="ao-cell-details">
-
                                             <div class="ao-cell-addr">
                                                 <i class="bi bi-geo-alt-fill"></i>
-                                                <div class="ao-cell-addr-text">
-                                                    <?= htmlspecialchars($o['full_address'] ?: $address) ?>
-                                                </div>
+                                                <div class="ao-cell-addr-text"><?= htmlspecialchars($addrSafe) ?></div>
                                             </div>
 
                                             <?php if ($oNote !== ''): ?>
@@ -1685,9 +1977,7 @@ $ordersJson = array_map(function ($o) {
                                         </div>
                                     </td>
 
-                                    <td data-lbl="Total">
-                                        <strong>₹<?= number_format((float)$o['total_amount'], 2) ?></strong>
-                                    </td>
+                                    <td data-lbl="Total"><strong>₹<?= number_format((float)$o['total_amount'], 2) ?></strong></td>
                                     <td data-lbl="Payment">
                                         <span class="ao-pill <?= $isPaid ? 'is-paid' : 'is-unpaid' ?>">
                                             <i class="bi <?= $isPaid ? 'bi-check-circle-fill' : 'bi-x-circle-fill' ?>"></i>
@@ -1734,21 +2024,21 @@ $ordersJson = array_map(function ($o) {
                                                 </button>
                                             <?php endif; ?>
 
-                                            <?php if ($hasContainer && $custPending > 0 && !empty($o['customer_mobile']) && $o['customer_mobile'] !== '—'): ?>
+                                            <?php if ($hasContainer && $custPending > 0 && $mobileSafe !== ''): ?>
                                                 <button type="button"
                                                     class="ao-mini-btn js-container"
                                                     data-id="<?= $oId ?>"
-                                                    data-mobile="<?= htmlspecialchars($o['customer_mobile']) ?>">
+                                                    data-mobile="<?= htmlspecialchars($mobileSafe) ?>">
                                                     <i class="bi bi-box2-heart"></i> Return
                                                 </button>
                                             <?php endif; ?>
 
-                                            <?php if (!empty($o['customer_mobile']) && $o['customer_mobile'] !== '—'): ?>
+                                            <?php if ($showWallet): ?>
                                                 <button type="button"
                                                     class="ao-mini-btn wallet js-wallet"
                                                     data-id="<?= $oId ?>"
-                                                    data-mobile="<?= htmlspecialchars($o['customer_mobile']) ?>"
-                                                    data-name="<?= htmlspecialchars($o['customer_name']) ?>">
+                                                    data-mobile="<?= htmlspecialchars($mobileSafe) ?>"
+                                                    data-name="<?= htmlspecialchars($nameSafe) ?>">
                                                     <i class="bi bi-wallet2"></i> Wallet
                                                 </button>
                                             <?php endif; ?>
@@ -1760,11 +2050,10 @@ $ordersJson = array_map(function ($o) {
                     </table>
                 </div>
             <?php endif; ?>
-
         </main>
     </div>
 
-    <!-- ============ MODALS (unchanged) ============ -->
+    <!-- Order details modal -->
     <div class="ao-modal-overlay" id="aoModal" aria-hidden="true">
         <div class="ao-modal" role="dialog" aria-modal="true">
             <div class="ao-modal-head">
@@ -1778,6 +2067,7 @@ $ordersJson = array_map(function ($o) {
         </div>
     </div>
 
+    <!-- Container modal -->
     <div class="ao-modal-overlay" id="aoContainerModal" aria-hidden="true">
         <div class="ao-modal" role="dialog" aria-modal="true" style="max-width:520px;">
             <div class="ao-modal-head">
@@ -1817,8 +2107,7 @@ $ordersJson = array_map(function ($o) {
                     <div class="ao-modal-actions">
                         <button type="button" class="ao-modal-btn ghost" id="containerCancel">Cancel</button>
                         <button type="submit" class="ao-modal-btn green" id="containerSubmit">
-                            <i class="bi bi-check-lg"></i>
-                            <span id="containerSubmitText">Mark Returned</span>
+                            <i class="bi bi-check-lg"></i> <span id="containerSubmitText">Mark Returned</span>
                         </button>
                     </div>
                 </form>
@@ -1826,6 +2115,7 @@ $ordersJson = array_map(function ($o) {
         </div>
     </div>
 
+    <!-- Wallet modal -->
     <div class="ao-modal-overlay" id="aoWalletModal" aria-hidden="true">
         <div class="ao-modal" role="dialog" aria-modal="true" style="max-width:520px;">
             <div class="ao-modal-head">
@@ -1845,12 +2135,8 @@ $ordersJson = array_map(function ($o) {
                     <span style="font-size:11px;color:#948c82;font-weight:700;" id="walletStatusLabel">—</span>
                 </div>
                 <div class="ao-wallet-tabs" id="walletTabs">
-                    <button type="button" class="ao-wallet-tab credit active" data-wtab="credit">
-                        <i class="bi bi-plus-circle"></i> Add Money
-                    </button>
-                    <button type="button" class="ao-wallet-tab debit" data-wtab="debit">
-                        <i class="bi bi-dash-circle"></i> Deduct Money
-                    </button>
+                    <button type="button" class="ao-wallet-tab credit active" data-wtab="credit"><i class="bi bi-plus-circle"></i> Add Money</button>
+                    <button type="button" class="ao-wallet-tab debit" data-wtab="debit"><i class="bi bi-dash-circle"></i> Deduct Money</button>
                 </div>
                 <form id="walletForm" autocomplete="off">
                     <input type="hidden" id="walletMobile" value="">
@@ -1878,8 +2164,7 @@ $ordersJson = array_map(function ($o) {
                     <div class="ao-modal-actions">
                         <button type="button" class="ao-modal-btn ghost" id="walletCancel">Cancel</button>
                         <button type="submit" class="ao-modal-btn primary" id="walletSubmit">
-                            <i class="bi bi-check-lg"></i>
-                            <span id="walletSubmitText">Add Money</span>
+                            <i class="bi bi-check-lg"></i> <span id="walletSubmitText">Add Money</span>
                         </button>
                     </div>
                 </form>
@@ -1888,9 +2173,7 @@ $ordersJson = array_map(function ($o) {
                         <h4 style="margin:0;font-family:'Playfair Display',serif;font-size:14px;font-weight:700;color:#302923;">
                             <i class="bi bi-clock-history" style="color:#b51f2c;margin-right:4px;"></i> Recent Transactions
                         </h4>
-                        <button type="button" class="ao-mini-btn" id="walletRefreshHistory">
-                            <i class="bi bi-arrow-clockwise"></i> Refresh
-                        </button>
+                        <button type="button" class="ao-mini-btn" id="walletRefreshHistory"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
                     </div>
                     <div class="ao-history-wrap" id="walletHistory">
                         <div style="padding:24px;text-align:center;color:#948c82;font-size:11.5px;">Loading…</div>
@@ -1900,11 +2183,9 @@ $ordersJson = array_map(function ($o) {
         </div>
     </div>
 
-    <!-- ============ LIGHTBOX ============ -->
+    <!-- LIGHTBOX -->
     <div class="ao-img-preview" id="aoLightbox">
-        <button type="button" class="ao-img-preview-close" id="aoLightboxClose">
-            <i class="bi bi-x-lg"></i>
-        </button>
+        <button type="button" class="ao-img-preview-close" id="aoLightboxClose"><i class="bi bi-x-lg"></i></button>
 
         <div id="aoLbPhotoMode" style="display:none;flex-direction:column;align-items:center;gap:16px;">
             <img src="" alt="House Preview" id="aoLbPhotoImg">
@@ -1933,7 +2214,7 @@ $ordersJson = array_map(function ($o) {
         </div>
     </div>
 
-    <!-- Visually hidden file input — display:none blocks picker in some browsers -->
+    <!-- Hidden file input -->
     <input type="file" id="housePhotoInput" accept="image/jpeg,image/png,image/webp"
         style="position:fixed;left:-9999px;top:-9999px;opacity:0;width:1px;height:1px;pointer-events:none;">
 
@@ -1971,115 +2252,6 @@ $ordersJson = array_map(function ($o) {
             if (toggle) toggle.addEventListener("click", openSidebar);
             if (closeBtn) closeBtn.addEventListener("click", closeSidebar);
             if (overlay) overlay.addEventListener("click", closeSidebar);
-        })();
-
-        document.querySelectorAll(".ao-tab").forEach(tab => {
-            tab.addEventListener("click", () => {
-                const s = document.getElementById("statusInput");
-                if (s) s.value = tab.dataset.status;
-                document.getElementById("filterForm").submit();
-            });
-        });
-
-        (function() {
-            const lb = document.getElementById("aoLightbox");
-            const closeBtn = document.getElementById("aoLightboxClose");
-            const photoMode = document.getElementById("aoLbPhotoMode");
-            const emptyMode = document.getElementById("aoLbEmptyMode");
-            const locationMode = document.getElementById("aoLbLocationMode");
-            const photoImg = document.getElementById("aoLbPhotoImg");
-            const locationAddr = document.getElementById("aoLbLocationAddr");
-            const mapLink = document.getElementById("aoLbMapLink");
-            const copyAddr = document.getElementById("aoLbCopyAddr");
-            const toast = document.getElementById("aoToast");
-
-            function showToast(msg, isErr) {
-                if (!toast) return;
-                toast.textContent = msg;
-                toast.className = "ao-toast show" + (isErr ? " error" : "");
-                clearTimeout(toast._t);
-                toast._t = setTimeout(() => (toast.className = "ao-toast"), 2800);
-            }
-
-            function openLightbox() {
-                lb.classList.add("show");
-                document.body.style.overflow = "hidden";
-            }
-
-            function closeLightbox() {
-                lb.classList.remove("show");
-                photoImg.src = "";
-                document.body.style.overflow = "";
-            }
-
-            closeBtn.addEventListener("click", closeLightbox);
-            lb.addEventListener("click", e => {
-                if (e.target === lb) closeLightbox();
-            });
-            document.addEventListener("keydown", e => {
-                if (e.key === "Escape") closeLightbox();
-            });
-
-            function showPhotoMode(src) {
-                if (src) {
-                    photoImg.src = src;
-                    photoMode.style.display = "flex";
-                    emptyMode.style.display = "none";
-                    locationMode.style.display = "none";
-                    photoImg.onerror = () => {
-                        photoMode.style.display = "none";
-                        emptyMode.style.display = "flex";
-                    };
-                } else {
-                    photoMode.style.display = "none";
-                    emptyMode.style.display = "flex";
-                    locationMode.style.display = "none";
-                }
-                openLightbox();
-            }
-
-            function showLocationMode(mapUrl, address) {
-                locationMode.style.display = "flex";
-                photoMode.style.display = "none";
-                emptyMode.style.display = "none";
-                locationAddr.textContent = address || "—";
-                mapLink.href = mapUrl || "#";
-
-                copyAddr.onclick = () => {
-                    if (!address) return;
-                    if (navigator.clipboard && navigator.clipboard.writeText) {
-                        navigator.clipboard.writeText(address)
-                            .then(() => showToast("Address copied to clipboard."))
-                            .catch(() => showToast("Could not copy address.", true));
-                    } else {
-                        const ta = document.createElement("textarea");
-                        ta.value = address;
-                        document.body.appendChild(ta);
-                        ta.select();
-                        try {
-                            document.execCommand("copy");
-                            showToast("Address copied to clipboard.");
-                        } catch (e) {
-                            showToast("Could not copy address.", true);
-                        }
-                        document.body.removeChild(ta);
-                    }
-                };
-
-                openLightbox();
-            }
-
-            document.querySelectorAll(".js-open-house-photo").forEach(btn => {
-                btn.addEventListener("click", function() {
-                    showPhotoMode(this.dataset.imageSrc || "");
-                });
-            });
-
-            document.querySelectorAll(".js-open-location").forEach(btn => {
-                btn.addEventListener("click", function() {
-                    showLocationMode(this.dataset.map || "", this.dataset.address || "");
-                });
-            });
         })();
     </script>
 
