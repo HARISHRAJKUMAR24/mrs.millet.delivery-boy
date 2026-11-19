@@ -78,7 +78,6 @@ try {
     );
     $s4->execute([$boyId]);
     $totalCount = (int)$s4->fetchColumn();
-
 } catch (PDOException $e) {
     // Leave at 0
 }
@@ -113,7 +112,11 @@ try {
     <?php include './includes/head.php'; ?>
     <style>
         /* Real-data specific tweaks */
-        .recent-list { display: flex; flex-direction: column; gap: 10px; }
+        .recent-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
 
         .recent-item {
             display: flex;
@@ -149,7 +152,10 @@ try {
             flex-shrink: 0;
         }
 
-        .recent-info { flex: 1; min-width: 0; }
+        .recent-info {
+            flex: 1;
+            min-width: 0;
+        }
 
         .recent-code {
             font-size: 13px;
@@ -205,9 +211,20 @@ try {
             margin-top: 4px;
         }
 
-        .recent-status.delivered { background: #e8f6ea; color: #1b5e20; }
-        .recent-status.pending   { background: #fdf1e2; color: #a35a0e; }
-        .recent-status.cancelled { background: #fdeaea; color: #b51f2c; }
+        .recent-status.delivered {
+            background: #e8f6ea;
+            color: #1b5e20;
+        }
+
+        .recent-status.pending {
+            background: #fdf1e2;
+            color: #a35a0e;
+        }
+
+        .recent-status.cancelled {
+            background: #fdeaea;
+            color: #b51f2c;
+        }
     </style>
 </head>
 
@@ -319,7 +336,7 @@ try {
             <section class="section">
                 <div class="section-head">
                     <h3>Recent Activity</h3>
-                    <a href="<?= BASE_URL ?>history.php">View all</a>
+                    <a href="<?= BASE_URL ?>delivery-orders.php">View all</a>
                 </div>
 
                 <?php if (empty($recentOrders)): ?>
@@ -335,7 +352,7 @@ try {
                             $statusClass = $isDelivered ? 'delivered' : ($o['status'] === 'cancelled' ? 'cancelled' : 'pending');
                             $statusLabel = $isDelivered ? 'Delivered' : ucfirst($o['status']);
                         ?>
-                            <a href="<?= BASE_URL ?>order-view.php?id=<?= (int)$o['id'] ?>" class="recent-item">
+                            <a href="#" class="recent-item">
                                 <div class="recent-avatar"><?= htmlspecialchars($initial) ?></div>
                                 <div class="recent-info">
                                     <div class="recent-code">#<?= htmlspecialchars($o['order_code']) ?></div>
