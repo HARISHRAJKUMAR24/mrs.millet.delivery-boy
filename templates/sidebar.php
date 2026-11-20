@@ -39,7 +39,7 @@ $currentPage = basename($_SERVER['PHP_SELF']);
             </a>
         </li>
         <li>
-            <a href="<?= BASE_URL ?>history.php" class="<?= $currentPage === 'history.php' ? 'active' : '' ?>">
+            <a href="<?= BASE_URL ?>delivery-history.php" class="<?= $currentPage === 'delivery-history.php' ? 'active' : '' ?>">
                 <i class="bi bi-clock-history"></i>
                 History
             </a>

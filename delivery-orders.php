@@ -83,14 +83,17 @@ try {
         }
     }
 
-    /* ---- Individual House groups ---- */
+    /* ---- Individual House groups (with customer info) ---- */
     $ihStmt = $pdo->prepare(
         "SELECT
             JSON_UNQUOTE(JSON_EXTRACT(o.address_json, '$.full_address')) AS full_address,
+            MAX(c.full_name)     AS customer_name,
+            MAX(c.mobile_number) AS customer_mobile,
             COUNT(*) AS total_count,
             SUM(CASE WHEN o.status <> 'delivered' AND o.status <> 'cancelled' THEN 1 ELSE 0 END) AS pending_count,
             SUM(CASE WHEN o.status = 'delivered' THEN 1 ELSE 0 END) AS delivered_count
          FROM orders o
+         LEFT JOIN customers c ON c.customer_id = o.customer_id
          WHERE o.delivery_boy_id = ?
            AND o.delivery_mode = 'delivery'
            AND o.address_type = 'individual_house'
@@ -272,6 +275,14 @@ foreach ($individualHouses as $h) $totalPending += (int)$h['pending_count'];
             margin: 3px 0 0;
             font-weight: 700;
             letter-spacing: .3px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .apt-card-code i {
+            font-size: 10px;
+            color: #b51f2c;
         }
 
         .apt-card-addr {
@@ -576,28 +587,37 @@ foreach ($individualHouses as $h) $totalPending += (int)$h['pending_count'];
                         <?php foreach ($individualHouses as $h):
                             $pending   = (int)$h['pending_count'];
                             $delivered = (int)$h['delivered_count'];
-                            $addr      = $h['full_address'] ?? '';
+                            $addr      = $h['full_address']   ?? '';
+                            $custName  = $h['customer_name']  ?? '—';
+                            $custMobile = $h['customer_mobile'] ?? '';
                         ?>
                             <div class="apt-card"
                                 data-type="individual_house"
                                 data-address="<?= htmlspecialchars($addr) ?>"
-                                data-search="<?= htmlspecialchars(strtolower($addr)) ?>">
+                                data-search="<?= htmlspecialchars(strtolower($addr . ' ' . $custName . ' ' . $custMobile)) ?>">
 
                                 <div class="apt-card-head">
                                     <div class="apt-card-icon house">
                                         <i class="bi bi-house-door"></i>
                                     </div>
                                     <div class="apt-card-info">
-                                        <p class="apt-card-name">Individual House</p>
-                                        <p class="apt-card-code">Delivery Address</p>
+                                        <p class="apt-card-name"><?= htmlspecialchars($custName) ?></p>
+                                        <p class="apt-card-code">
+                                            <?php if ($custMobile): ?>
+                                                <i class="bi bi-telephone-fill"></i>
+                                                <?= htmlspecialchars($custMobile) ?>
+                                            <?php else: ?>
+                                                Individual House
+                                            <?php endif; ?>
+                                        </p>
                                     </div>
                                 </div>
 
                                 <p class="apt-card-addr" style="
-                                    background:#eef7f0;color:#2e7d32;
-                                    border-radius:9px;padding:8px 10px;
-                                    -webkit-line-clamp:3;line-clamp:3;
-                                    font-weight:600;">
+                background:#eef7f0;color:#2e7d32;
+                border-radius:9px;padding:8px 10px;
+                -webkit-line-clamp:3;line-clamp:3;
+                font-weight:600;">
                                     <i class="bi bi-geo-alt-fill"></i>
                                     <?= htmlspecialchars($addr) ?>
                                 </p>
