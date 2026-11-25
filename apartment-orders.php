@@ -46,13 +46,19 @@ if (!$apartment) {
     exit;
 }
 
-/* ---------------- ACTIVE MENUS ---------------- */
+/* =========================================================
+   ✅ ONLY DELIVERY-ENABLED ACTIVE MENUS
+   - status = 1
+   - currently live (start_at <= NOW() AND end_at >= NOW())
+   - delivery_status = 'enabled'
+   ========================================================= */
 $activeMenus = [];
 try {
     $mStmt = $pdo->query(
-        "SELECT menu_code, menu_name, start_at, end_at
+        "SELECT menu_code, menu_name, start_at, end_at, delivery_status
          FROM menus
          WHERE status = 1
+           AND delivery_status = 'enabled'
            AND start_at <= NOW()
            AND end_at   >= NOW()
          ORDER BY id DESC"
@@ -61,6 +67,7 @@ try {
 } catch (PDOException $e) {
 }
 
+/* Selected menu must be one of the delivery-enabled menus */
 $selectedMenuCode = trim($_GET['menu'] ?? '');
 $selectedMenu     = null;
 if ($selectedMenuCode !== '') {
@@ -82,194 +89,225 @@ $dateFilter   = trim($_GET['date']   ?? '');
 $allowedStatus = ['pending', 'delivered', 'all'];
 if (!in_array($statusFilter, $allowedStatus, true)) $statusFilter = 'pending';
 
+/* Build list of enabled menu codes (used in SQL IN clause) */
+$enabledMenuCodes = array_map(function ($m) {
+    return $m['menu_code'];
+}, $activeMenus);
+
 /* =========================================================
    ORDERS
+   - Only orders belonging to delivery-enabled menus are shown.
    ========================================================= */
 $orders = [];
 try {
-    $sql = "SELECT
-                o.id, o.order_code, o.delivery_boy_id,
-                o.customer_id,
-                c.id              AS customer_row_id,
-                c.full_name       AS customer_name,
-                c.mobile_number   AS customer_mobile,
-                c.address_json    AS customer_address_json,
-                o.address_type, o.address_json,
-                o.division_charge, o.subtotal, o.total_amount,
-                o.products_json, o.order_note,
-                o.status, o.delivery_status, o.payment_status,
-                o.payment_ref, o.paid_at, o.created_at, o.updated_at,
 
-                oc.total_containers,
-                oc.received_containers,
-                (oc.total_containers - oc.received_containers) AS pending_containers,
-                oc.container_amount,
-                oc.status AS container_status
-            FROM orders o
-            LEFT JOIN customers c ON c.customer_id = o.customer_id
-            LEFT JOIN order_containers oc ON oc.order_id = o.id
-            WHERE JSON_VALID(o.address_json)
-              AND JSON_UNQUOTE(JSON_EXTRACT(o.address_json, '$.apartment_code')) = ?
-              AND o.delivery_boy_id = ?
-              AND o.delivery_mode = 'delivery'
-              AND o.status <> 'cancelled'";
+    // If no delivery-enabled menu is live → skip query, orders stay empty
+    if (empty($enabledMenuCodes)) {
+        $orders = [];
+    } else {
 
-    $params = [$aptCode, $boyId];
+        $sql = "SELECT
+                    o.id, o.order_code, o.delivery_boy_id,
+                    o.customer_id,
+                    c.id              AS customer_row_id,
+                    c.full_name       AS customer_name,
+                    c.mobile_number   AS customer_mobile,
+                    c.address_json    AS customer_address_json,
+                    o.address_type, o.address_json,
+                    o.division_charge, o.subtotal, o.total_amount,
+                    o.products_json, o.order_note,
+                    o.status, o.delivery_status, o.payment_status,
+                    o.payment_ref, o.paid_at, o.created_at, o.updated_at,
 
-    if ($selectedMenu) {
-        $sql .= " AND o.created_at BETWEEN ? AND ?";
-        $params[] = $selectedMenu['start_at'];
-        $params[] = $selectedMenu['end_at'];
-    }
+                    oc.total_containers,
+                    oc.received_containers,
+                    (oc.total_containers - oc.received_containers) AS pending_containers,
+                    oc.container_amount,
+                    oc.status AS container_status
+                FROM orders o
+                LEFT JOIN customers c ON c.customer_id = o.customer_id
+                LEFT JOIN order_containers oc ON oc.order_id = o.id
+                WHERE JSON_VALID(o.address_json)
+                  AND JSON_UNQUOTE(JSON_EXTRACT(o.address_json, '$.apartment_code')) = ?
+                  AND o.delivery_boy_id = ?
+                  AND o.delivery_mode = 'delivery'
+                  AND o.status <> 'cancelled'";
 
-    if ($statusFilter === 'pending') {
-        $sql .= " AND o.delivery_status = 'disabled'";
-    } elseif ($statusFilter === 'delivered') {
-        $sql .= " AND o.delivery_status = 'enabled'";
-    }
+        $params = [$aptCode, $boyId];
 
-    if ($dateFilter !== '') {
-        $sql .= " AND DATE(o.created_at) = ?";
-        $params[] = $dateFilter;
-    }
-
-    $sql .= " ORDER BY o.id DESC";
-
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    /* ---------- Preload house_image + map_link from customer_address_requests ---------- */
-    $requestImages = [];
-    $requestMaps   = [];
-    try {
-        $ri = $pdo->prepare(
-            "SELECT customer_mobile, house_image, map_link, requested_division
-             FROM customer_address_requests
-             WHERE request_type = 'apartment'
-               AND (requested_apartment = ? OR created_apartment_id = ?)
-             ORDER BY id DESC"
-        );
-        $ri->execute([$apartment['apartment_name'], (int)$apartment['id']]);
-        foreach ($ri->fetchAll(PDO::FETCH_ASSOC) as $rr) {
-            $k = ($rr['customer_mobile'] !== '' ? $rr['customer_mobile'] : '_');
-
-            if (!empty($rr['house_image'])) {
-                if (!isset($requestImages[$k])) $requestImages[$k] = $rr['house_image'];
-                if (!isset($requestImages['_'])) $requestImages['_'] = $rr['house_image'];
-            }
-            if (!empty($rr['map_link'])) {
-                if (!isset($requestMaps[$k])) $requestMaps[$k] = $rr['map_link'];
-                if (!isset($requestMaps['_'])) $requestMaps['_'] = $rr['map_link'];
-            }
-        }
-    } catch (PDOException $e) {
-    }
-
-    foreach ($rows as &$r) {
-        $addrOrder = json_decode($r['address_json'] ?? '[]', true);
-        if (!is_array($addrOrder)) $addrOrder = [];
-
-        $addrCust = json_decode($r['customer_address_json'] ?? '[]', true);
-        if (!is_array($addrCust)) $addrCust = [];
-
-        $r['apartment_name'] = $addrOrder['apartment_name'] ?? ($addrCust['apartment_name'] ?? ($apartment['apartment_name'] ?? ''));
-        $r['apartment_code'] = $addrOrder['apartment_code'] ?? ($addrCust['apartment_code'] ?? ($apartment['apartment_code'] ?? ''));
-        $r['division']       = $addrOrder['division_label'] ?? ($addrCust['division_label'] ?? '');
-
-        $customerTyped = '';
-        if (!empty($addrOrder['full_address']))      $customerTyped = trim($addrOrder['full_address']);
-        elseif (!empty($addrCust['full_address']))   $customerTyped = trim($addrCust['full_address']);
-
-        if ($customerTyped !== '') {
-            $r['full_address'] = $customerTyped;
+        // ✅ restrict to enabled menus
+        if ($selectedMenu) {
+            $sql .= " AND o.created_at BETWEEN ? AND ?";
+            $params[] = $selectedMenu['start_at'];
+            $params[] = $selectedMenu['end_at'];
         } else {
-            $r['full_address'] = trim(
-                ($r['apartment_name'] ?? '') . ' ' .
-                    ($r['division'] ?? '') . ' ' .
-                    ($apartment['apartment_address'] ?? '')
-            );
+            // No selected menu — but activeMenus not empty → use IN list
+            $placeholders = implode(',', array_fill(0, count($enabledMenuCodes), '?'));
+            $sql .= " AND JSON_UNQUOTE(JSON_EXTRACT(o.products_json, '$[0].menu_code')) IN ($placeholders)";
+            foreach ($enabledMenuCodes as $mc) {
+                $params[] = $mc;
+            }
         }
 
-        $mobileRaw = $r['customer_mobile'] ?: '';
-        $mobileKey = $mobileRaw !== '' ? $mobileRaw : '_';
+        if ($statusFilter === 'pending') {
+            $sql .= " AND o.delivery_status = 'disabled'";
+        } elseif ($statusFilter === 'delivered') {
+            $sql .= " AND o.delivery_status = 'enabled'";
+        }
 
-        $r['map_link'] = $addrOrder['map_link']
-            ?? $addrCust['map_link']
-            ?? $requestMaps[$mobileKey]
-            ?? $requestMaps['_']
-            ?? '';
+        if ($dateFilter !== '') {
+            $sql .= " AND DATE(o.created_at) = ?";
+            $params[] = $dateFilter;
+        }
 
-        $r['house_image'] = $requestImages[$mobileKey]
-            ?? $requestImages['_']
-            ?? $addrCust['house_image']
-            ?? $addrOrder['house_image']
-            ?? '';
+        $sql .= " ORDER BY o.id DESC";
 
-        $r['customer_name']   = $r['customer_name']   ?: '—';
-        $r['customer_mobile'] = $mobileRaw            ?: '—';
-        $r['house_image_url'] = $r['house_image'] !== ''
-            ? rtrim(MAIN_URL, '/') . '/' . ltrim($r['house_image'], '/')
-            : '';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        /* ---------- Preload house_image + map_link ---------- */
+        $requestImages = [];
+        $requestMaps   = [];
+        try {
+            $ri = $pdo->prepare(
+                "SELECT customer_mobile, house_image, map_link, requested_division
+                 FROM customer_address_requests
+                 WHERE request_type = 'apartment'
+                   AND (requested_apartment = ? OR created_apartment_id = ?)
+                 ORDER BY id DESC"
+            );
+            $ri->execute([$apartment['apartment_name'], (int)$apartment['id']]);
+            foreach ($ri->fetchAll(PDO::FETCH_ASSOC) as $rr) {
+                $k = ($rr['customer_mobile'] !== '' ? $rr['customer_mobile'] : '_');
+
+                if (!empty($rr['house_image'])) {
+                    if (!isset($requestImages[$k])) $requestImages[$k] = $rr['house_image'];
+                    if (!isset($requestImages['_'])) $requestImages['_'] = $rr['house_image'];
+                }
+                if (!empty($rr['map_link'])) {
+                    if (!isset($requestMaps[$k])) $requestMaps[$k] = $rr['map_link'];
+                    if (!isset($requestMaps['_'])) $requestMaps['_'] = $rr['map_link'];
+                }
+            }
+        } catch (PDOException $e) {
+        }
+
+        foreach ($rows as &$r) {
+            $addrOrder = json_decode($r['address_json'] ?? '[]', true);
+            if (!is_array($addrOrder)) $addrOrder = [];
+
+            $addrCust = json_decode($r['customer_address_json'] ?? '[]', true);
+            if (!is_array($addrCust)) $addrCust = [];
+
+            $r['apartment_name'] = $addrOrder['apartment_name'] ?? ($addrCust['apartment_name'] ?? ($apartment['apartment_name'] ?? ''));
+            $r['apartment_code'] = $addrOrder['apartment_code'] ?? ($addrCust['apartment_code'] ?? ($apartment['apartment_code'] ?? ''));
+            $r['division']       = $addrOrder['division_label'] ?? ($addrCust['division_label'] ?? '');
+
+            $customerTyped = '';
+            if (!empty($addrOrder['full_address']))      $customerTyped = trim($addrOrder['full_address']);
+            elseif (!empty($addrCust['full_address']))   $customerTyped = trim($addrCust['full_address']);
+
+            if ($customerTyped !== '') {
+                $r['full_address'] = $customerTyped;
+            } else {
+                $r['full_address'] = trim(
+                    ($r['apartment_name'] ?? '') . ' ' .
+                        ($r['division'] ?? '') . ' ' .
+                        ($apartment['apartment_address'] ?? '')
+                );
+            }
+
+            $mobileRaw = $r['customer_mobile'] ?: '';
+            $mobileKey = $mobileRaw !== '' ? $mobileRaw : '_';
+
+            $r['map_link'] = $addrOrder['map_link']
+                ?? $addrCust['map_link']
+                ?? $requestMaps[$mobileKey]
+                ?? $requestMaps['_']
+                ?? '';
+
+            $r['house_image'] = $requestImages[$mobileKey]
+                ?? $requestImages['_']
+                ?? $addrCust['house_image']
+                ?? $addrOrder['house_image']
+                ?? '';
+
+            $r['customer_name']   = $r['customer_name']   ?: '—';
+            $r['customer_mobile'] = $mobileRaw            ?: '—';
+            $r['house_image_url'] = $r['house_image'] !== ''
+                ? rtrim(MAIN_URL, '/') . '/' . ltrim($r['house_image'], '/')
+                : '';
+        }
+        unset($r);
+
+        $orders = $rows;
     }
-    unset($r);
-
-    $orders = $rows;
 } catch (PDOException $e) {
     $orders = [];
 }
 
 /* =========================================================
    CONTAINER SUMMARY
+   (Only for enabled-menu orders as well)
    ========================================================= */
 $containerSummary = [];
 try {
-    $sumSql = "SELECT
-            COALESCE(oc.customer_id,
-                     (SELECT c2.id FROM customers c2 WHERE c2.customer_id = o.customer_id LIMIT 1)
-            ) AS customer_row_id,
-            c.full_name     AS customer_name,
-            c.mobile_number AS customer_mobile,
-            SUM(oc.total_containers)     AS total_containers,
-            SUM(oc.received_containers)  AS received_containers,
-            SUM(oc.total_containers - oc.received_containers) AS pending_containers,
-            SUM(oc.container_amount)     AS container_amount,
-            COUNT(DISTINCT oc.order_id)  AS order_count
-         FROM order_containers oc
-         INNER JOIN orders o    ON o.id = oc.order_id
-         LEFT  JOIN customers c ON c.customer_id = o.customer_id
-         WHERE JSON_VALID(o.address_json)
-           AND JSON_UNQUOTE(JSON_EXTRACT(o.address_json, '$.apartment_code')) = ?
-           AND o.delivery_boy_id = ?
-           AND o.status <> 'cancelled'";
+    if (!empty($enabledMenuCodes)) {
 
-    $sumParams = [$aptCode, $boyId];
+        $sumSql = "SELECT
+                COALESCE(oc.customer_id,
+                         (SELECT c2.id FROM customers c2 WHERE c2.customer_id = o.customer_id LIMIT 1)
+                ) AS customer_row_id,
+                c.full_name     AS customer_name,
+                c.mobile_number AS customer_mobile,
+                SUM(oc.total_containers)     AS total_containers,
+                SUM(oc.received_containers)  AS received_containers,
+                SUM(oc.total_containers - oc.received_containers) AS pending_containers,
+                SUM(oc.container_amount)     AS container_amount,
+                COUNT(DISTINCT oc.order_id)  AS order_count
+             FROM order_containers oc
+             INNER JOIN orders o    ON o.id = oc.order_id
+             LEFT  JOIN customers c ON c.customer_id = o.customer_id
+             WHERE JSON_VALID(o.address_json)
+               AND JSON_UNQUOTE(JSON_EXTRACT(o.address_json, '$.apartment_code')) = ?
+               AND o.delivery_boy_id = ?
+               AND o.status <> 'cancelled'";
 
-    if ($selectedMenu) {
-        $sumSql .= " AND o.created_at BETWEEN ? AND ?";
-        $sumParams[] = $selectedMenu['start_at'];
-        $sumParams[] = $selectedMenu['end_at'];
-    }
+        $sumParams = [$aptCode, $boyId];
 
-    $sumSql .= " GROUP BY customer_row_id, c.full_name, c.mobile_number
-                 HAVING SUM(oc.total_containers - oc.received_containers) > 0";
+        if ($selectedMenu) {
+            $sumSql .= " AND o.created_at BETWEEN ? AND ?";
+            $sumParams[] = $selectedMenu['start_at'];
+            $sumParams[] = $selectedMenu['end_at'];
+        } else {
+            $placeholders = implode(',', array_fill(0, count($enabledMenuCodes), '?'));
+            $sumSql .= " AND JSON_UNQUOTE(JSON_EXTRACT(o.products_json, '$[0].menu_code')) IN ($placeholders)";
+            foreach ($enabledMenuCodes as $mc) {
+                $sumParams[] = $mc;
+            }
+        }
 
-    $sumStmt = $pdo->prepare($sumSql);
-    $sumStmt->execute($sumParams);
-    $rows = $sumStmt->fetchAll(PDO::FETCH_ASSOC);
+        $sumSql .= " GROUP BY customer_row_id, c.full_name, c.mobile_number
+                     HAVING SUM(oc.total_containers - oc.received_containers) > 0";
 
-    foreach ($rows as $r) {
-        $key = (string)($r['customer_mobile'] ?: ('cid_' . (int)$r['customer_row_id']));
-        $containerSummary[$key] = [
-            'customer_id'         => (int)($r['customer_row_id'] ?? 0),
-            'customer_name'       => $r['customer_name'] ?: '—',
-            'customer_mobile'     => $r['customer_mobile'] ?: '',
-            'total_containers'    => (int)$r['total_containers'],
-            'received_containers' => (int)$r['received_containers'],
-            'pending_containers'  => (int)$r['pending_containers'],
-            'container_amount'    => (float)$r['container_amount'],
-            'order_count'         => (int)$r['order_count'],
-        ];
+        $sumStmt = $pdo->prepare($sumSql);
+        $sumStmt->execute($sumParams);
+        $rows = $sumStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($rows as $r) {
+            $key = (string)($r['customer_mobile'] ?: ('cid_' . (int)$r['customer_row_id']));
+            $containerSummary[$key] = [
+                'customer_id'         => (int)($r['customer_row_id'] ?? 0),
+                'customer_name'       => $r['customer_name'] ?: '—',
+                'customer_mobile'     => $r['customer_mobile'] ?: '',
+                'total_containers'    => (int)$r['total_containers'],
+                'received_containers' => (int)$r['received_containers'],
+                'pending_containers'  => (int)$r['pending_containers'],
+                'container_amount'    => (float)$r['container_amount'],
+                'order_count'         => (int)$r['order_count'],
+            ];
+        }
     }
 } catch (PDOException $e) {
 }
@@ -1683,7 +1721,8 @@ $ordersJson = array_map(function ($o) {
                     <div class="ao-empty">
                         <i class="bi bi-inbox"></i>
                         <?php if (empty($activeMenus)): ?>
-                            No menu is live right now.
+                            <strong>No delivery-enabled menu is live right now.</strong><br>
+                            <span style="font-size:11.5px;color:#a19a90;">Ask admin to enable delivery on an active menu.</span>
                         <?php elseif ($statusFilter === 'pending' && $dateFilter === ''): ?>
                             No pending orders right now.
                         <?php elseif ($statusFilter === 'delivered'): ?>
@@ -2052,7 +2091,6 @@ $ordersJson = array_map(function ($o) {
         </div>
     </div>
 
-    <!-- ✅ Hidden file input for house photo upload (THIS WAS MISSING) -->
     <input type="file" id="housePhotoInput" accept="image/jpeg,image/png,image/webp"
         style="position:fixed;left:-9999px;top:-9999px;opacity:0;width:1px;height:1px;pointer-events:none;">
 
