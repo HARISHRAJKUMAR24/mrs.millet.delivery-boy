@@ -500,33 +500,73 @@
     /* =====================================================
        HOUSE PHOTO UPLOAD / REPLACE / DELETE
        ===================================================== */
+    /* Shrink big phone photos before upload (max 1280px, JPEG) */
+    function compressImage(file) {
+        return new Promise(function (resolve) {
+            const url = URL.createObjectURL(file);
+            const img = new Image();
+            img.onload = function () {
+                const scale = Math.min(1, 1280 / Math.max(img.width, img.height));
+                const canvas = document.createElement("canvas");
+                canvas.width = Math.max(1, Math.round(img.width * scale));
+                canvas.height = Math.max(1, Math.round(img.height * scale));
+                const g = canvas.getContext("2d");
+                g.fillStyle = "#fff";
+                g.fillRect(0, 0, canvas.width, canvas.height);
+                g.drawImage(img, 0, 0, canvas.width, canvas.height);
+                URL.revokeObjectURL(url);
+                canvas.toBlob(function (blob) { resolve(blob); }, "image/jpeg", 0.8);
+            };
+            img.onerror = function () {
+                URL.revokeObjectURL(url);
+                resolve(null);
+            };
+            img.src = url;
+        });
+    }
+
+    let photoBusy = false;
+
+    function sendPhotoRequest(fd) {
+        return fetch(BASE_URL + "ajax/upload-house-photo.php", {
+            method: "POST", body: fd, credentials: "same-origin"
+        }).then(r => r.json().catch(() => ({
+            success: false,
+            message: r.status === 413 ? "Photo is too big for the server." : "Server error (" + r.status + ")."
+        })));
+    }
+
     function uploadHousePhoto(file) {
-        if (!photoCtx || !file) return;
-
-        const fd = new FormData();
-        fd.append("address", photoCtx.address);
-        fd.append("customer_mobile", photoCtx.mobile);
-        fd.append("customer_name", photoCtx.name);
-        fd.append("action", "upload");
-        fd.append("house_image", file);
-
+        if (!photoCtx || !file || photoBusy) return;
+        const ctx = photoCtx;
+        photoBusy = true;
         showToast("Uploading photo…");
 
-        fetch(BASE_URL + "ajax/upload-house-photo.php", {
-            method: "POST",
-            body: fd,
-            credentials: "same-origin"
-        })
-            .then(r => r.json().catch(() => null))
+        compressImage(file)
+            .then(blob => {
+                if (!blob) {
+                    return { success: false, message: "Cannot read this photo. Use JPG, PNG or WEBP." };
+                }
+                const fd = new FormData();
+                fd.append("order_id", ctx.orderId);
+                fd.append("customer_name", ctx.name);
+                fd.append("action", "upload");
+                fd.append("house_image", blob, "house.jpg");
+                return sendPhotoRequest(fd);
+            })
             .then(res => {
                 if (!res || !res.success) {
+                    photoBusy = false;
                     showToast((res && res.message) || "Upload failed.", "error");
                     return;
                 }
-                showToast("Photo saved (previous replaced).");
+                showToast("Photo saved.");
                 setTimeout(() => location.reload(), 800);
             })
-            .catch(() => showToast("Unable to connect.", "error"));
+            .catch(() => {
+                photoBusy = false;
+                showToast("Unable to connect.", "error");
+            });
     }
 
     /* Upload button → open picker */
@@ -535,6 +575,7 @@
         if (!upBtn) return;
 
         photoCtx = {
+            orderId: upBtn.dataset.orderId || "",
             address: upBtn.dataset.address || "",
             mobile: upBtn.dataset.mobile || "",
             name: upBtn.dataset.name || ""
@@ -563,14 +604,10 @@
         if (!confirm("Remove the house photo?")) return;
 
         const fd = new FormData();
-        fd.append("address", del.dataset.address || "");
-        fd.append("customer_mobile", del.dataset.mobile || "");
+        fd.append("order_id", del.dataset.orderId || "");
         fd.append("action", "delete");
 
-        fetch(BASE_URL + "ajax/upload-house-photo.php", {
-            method: "POST", body: fd, credentials: "same-origin"
-        })
-            .then(r => r.json().catch(() => null))
+        sendPhotoRequest(fd)
             .then(res => {
                 if (!res || !res.success) {
                     showToast((res && res.message) || "Failed.", "error");

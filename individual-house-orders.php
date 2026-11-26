@@ -44,9 +44,7 @@ try {
          FROM menus
          WHERE status = 1
            AND delivery_status = 'enabled'
-           AND start_at <= NOW()
-           AND end_at   >= NOW()
-         ORDER BY id DESC"
+         ORDER BY start_at DESC, id DESC"
     );
     $activeMenus = $mStmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
@@ -69,6 +67,11 @@ if (!$selectedMenu && !empty($activeMenus)) {
 $enabledMenuCodes = array_map(function ($m) {
     return $m['menu_code'];
 }, $activeMenus);
+
+/* Matches "menu_code":"<selected code>" inside products_json */
+$menuPattern = $selectedMenu
+    ? '"menu_code"[[:space:]]*:[[:space:]]*"' . preg_quote($selectedMenu['menu_code']) . '"'
+    : '';
 
 /* ---------------- FILTERS ---------------- */
 $statusFilter = trim($_GET['status'] ?? 'pending');
@@ -117,18 +120,11 @@ try {
 
         $params = [$address, $boyId];
 
-        // ✅ restrict to enabled menus
-        if ($selectedMenu) {
-            $sql .= " AND o.created_at BETWEEN ? AND ?";
-            $params[] = $selectedMenu['start_at'];
-            $params[] = $selectedMenu['end_at'];
-        } else {
-            $placeholders = implode(',', array_fill(0, count($enabledMenuCodes), '?'));
-            $sql .= " AND JSON_UNQUOTE(JSON_EXTRACT(o.products_json, '$[0].menu_code')) IN ($placeholders)";
-            foreach ($enabledMenuCodes as $mc) {
-                $params[] = $mc;
-            }
-        }
+        // ✅ only orders of the selected delivery-enabled menu
+        $sql .= " AND o.created_at BETWEEN ? AND ? AND o.products_json REGEXP ?";
+        $params[] = $selectedMenu['start_at'];
+        $params[] = $selectedMenu['end_at'];
+        $params[] = $menuPattern;
 
         if ($statusFilter === 'pending') {
             $sql .= " AND o.delivery_status = 'disabled'";
@@ -147,27 +143,6 @@ try {
         $stmt->execute($params);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        /* Preload house_image from customer_address_requests */
-        $requestImages = [];
-        try {
-            $ri = $pdo->prepare(
-                "SELECT customer_mobile, house_image
-                 FROM customer_address_requests
-                 WHERE request_type = 'individual_house'
-                   AND requested_apartment = ?
-                   AND house_image IS NOT NULL
-                   AND house_image <> ''
-                 ORDER BY id DESC"
-            );
-            $ri->execute([$address]);
-            foreach ($ri->fetchAll(PDO::FETCH_ASSOC) as $rr) {
-                $k = ($rr['customer_mobile'] !== '' ? $rr['customer_mobile'] : '_');
-                if (!isset($requestImages[$k])) $requestImages[$k] = $rr['house_image'];
-                if (!isset($requestImages['_'])) $requestImages['_'] = $rr['house_image'];
-            }
-        } catch (PDOException $e) {
-        }
-
         foreach ($rows as &$r) {
             $addrOrder = json_decode($r['address_json'] ?? '[]', true);
             if (!is_array($addrOrder)) $addrOrder = [];
@@ -181,19 +156,14 @@ try {
             $mobileRaw = $r['customer_mobile'] ?: '';
             $mobileKey = $mobileRaw !== '' ? $mobileRaw : '_';
 
-            $imgPick = $requestImages[$mobileKey]
-                ?? ($addrCust['house_image'] ?? null)
-                ?? ($addrOrder['house_image'] ?? null)
-                ?? '';
-            $r['house_image'] = explode('?', (string)$imgPick)[0];
+            /* House photo: saved on the customer, shown from the admin URL */
+            $r['house_image'] = explode('?', (string)($addrCust['house_image'] ?? ''))[0];
 
             $r['customer_name']   = $r['customer_name']   ?: '—';
             $r['customer_mobile'] = $mobileRaw            ?: '—';
 
-            /* ✅ CHANGED: ADMIN_URL + version stamp */
             $r['house_image_url'] = $r['house_image'] !== ''
-                ? rtrim(ADMIN_URL, '/') . '/' . ltrim($r['house_image'], '/')
-                . '?v=' . (strtotime((string)($r['updated_at'] ?? '')) ?: time())
+                ? rtrim(ADMIN_URL, '/') . '/' . ltrim($r['house_image'], '/') . '?v=' . time()
                 : '';
         }
         unset($r);
@@ -234,17 +204,11 @@ try {
 
         $sumParams = [$address, $boyId];
 
-        if ($selectedMenu) {
-            $sumSql .= " AND o.created_at BETWEEN ? AND ?";
-            $sumParams[] = $selectedMenu['start_at'];
-            $sumParams[] = $selectedMenu['end_at'];
-        } else {
-            $placeholders = implode(',', array_fill(0, count($enabledMenuCodes), '?'));
-            $sumSql .= " AND JSON_UNQUOTE(JSON_EXTRACT(o.products_json, '$[0].menu_code')) IN ($placeholders)";
-            foreach ($enabledMenuCodes as $mc) {
-                $sumParams[] = $mc;
-            }
-        }
+        // ✅ only orders of the selected delivery-enabled menu
+        $sumSql .= " AND o.created_at BETWEEN ? AND ? AND o.products_json REGEXP ?";
+        $sumParams[] = $selectedMenu['start_at'];
+        $sumParams[] = $selectedMenu['end_at'];
+        $sumParams[] = $menuPattern;
 
         $sumSql .= " GROUP BY customer_row_id, c.full_name, c.mobile_number
                      HAVING SUM(oc.total_containers - oc.received_containers) > 0";
@@ -1827,8 +1791,8 @@ $ordersJson = array_map(function ($o) {
                     <div class="ao-empty">
                         <i class="bi bi-inbox"></i>
                         <?php if (empty($activeMenus)): ?>
-                            <strong>No delivery-enabled menu is live right now.</strong><br>
-                            <span style="font-size:11.5px;color:#a19a90;">Ask admin to enable delivery on an active menu.</span>
+                            <strong>No menu is enabled for delivery right now.</strong><br>
+                            <span style="font-size:11.5px;color:#a19a90;">Ask admin to enable delivery on a menu.</span>
                         <?php else: ?>
                             No orders match your filter.
                         <?php endif; ?>
@@ -1931,7 +1895,8 @@ $ordersJson = array_map(function ($o) {
                                                     data-address="<?= htmlspecialchars($addrSafe) ?>"
                                                     data-mobile="<?= htmlspecialchars($mobileSafe) ?>"
                                                     data-name="<?= htmlspecialchars($nameSafe) ?>"
-                                                    data-has-image="<?= $oHasImage ? '1' : '0' ?>">
+                                                    data-has-image="<?= $oHasImage ? '1' : '0' ?>"
+                                                    data-order-id="<?= (int)$o['id'] ?>">
                                                     <i class="bi bi-camera"></i> <?= $oHasImage ? 'Replace Photo' : 'Upload Photo' ?>
                                                 </button>
 
@@ -1945,6 +1910,7 @@ $ordersJson = array_map(function ($o) {
 
                                                     <button type="button"
                                                         class="ao-cell-btn js-delete-house-photo"
+                                                        data-order-id="<?= (int)$o['id'] ?>"
                                                         data-address="<?= htmlspecialchars($addrSafe) ?>"
                                                         data-mobile="<?= htmlspecialchars($mobileSafe) ?>">
                                                         <i class="bi bi-trash"></i> Remove
