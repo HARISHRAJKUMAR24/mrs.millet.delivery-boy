@@ -181,14 +181,19 @@ try {
             $mobileRaw = $r['customer_mobile'] ?: '';
             $mobileKey = $mobileRaw !== '' ? $mobileRaw : '_';
 
-            $r['house_image'] = $requestImages[$mobileKey]
-                ?? $requestImages['_']
-                ?? ($addrCust['house_image'] ?? ($addrOrder['house_image'] ?? ''));
+            $imgPick = $requestImages[$mobileKey]
+                ?? ($addrCust['house_image'] ?? null)
+                ?? ($addrOrder['house_image'] ?? null)
+                ?? '';
+            $r['house_image'] = explode('?', (string)$imgPick)[0];
 
             $r['customer_name']   = $r['customer_name']   ?: '—';
             $r['customer_mobile'] = $mobileRaw            ?: '—';
+
+            /* ✅ CHANGED: ADMIN_URL + version stamp */
             $r['house_image_url'] = $r['house_image'] !== ''
-                ? rtrim(MAIN_URL, '/') . '/' . ltrim($r['house_image'], '/')
+                ? rtrim(ADMIN_URL, '/') . '/' . ltrim($r['house_image'], '/')
+                . '?v=' . (strtotime((string)($r['updated_at'] ?? '')) ?: time())
                 : '';
         }
         unset($r);
@@ -1934,7 +1939,7 @@ $ordersJson = array_map(function ($o) {
                                                     <button type="button"
                                                         class="ao-cell-btn image js-open-house-photo"
                                                         data-order-id="<?= $oId ?>"
-                                                        data-image-src="<?= htmlspecialchars($oImage . '?t=' . $timeCache) ?>">
+                                                        data-image-src="<?= htmlspecialchars($oImage) ?>">
                                                         <i class="bi bi-image"></i> View Photo
                                                     </button>
 
